@@ -1,5 +1,9 @@
 # Dominant Control for iRacing
 
+<img width="1024" height="1024" alt="ChatGPT Image Dec 11, 2025, 12_52_14 PM" src="https://github.com/user-attachments/assets/0fd4acb4-c07f-4919-9219-4d69d3b3a0a7" />
+
+
+
 An accessibility and educational tool for iRacing that helps drivers manage vehicle controls, designed for those with physical limitations or equipment constraints.
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)

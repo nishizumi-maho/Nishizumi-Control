@@ -2543,6 +2543,11 @@ class iRacingControlApp:
         self.saved_presets[car]["_overlay"] = self.car_overlay_config[car]
 
         self.save_config()
+        # Allow auto-detection to load this preset the next time we see the pair
+        self.auto_load_attempted.discard((car, track))
+        # Immediately refresh listeners when saving the active car/track
+        if (car, track) == (self.current_car, self.current_track):
+            self.register_current_listeners()
         self.update_preset_ui()
         messagebox.showinfo("Saved", f"Preset saved for {car} @ {track}")
 

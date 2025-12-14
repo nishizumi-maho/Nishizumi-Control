@@ -26,6 +26,7 @@ import sys
 import random
 import warnings
 import threading
+import subprocess
 from typing import Dict, List, Tuple, Optional, Any, Callable
 
 # ======================================================================
@@ -89,21 +90,26 @@ if not os.path.exists(CONFIG_FILE):
 
 
 def restart_program():
-    """Restart the application."""
+    """Restart the application by closing and relaunching the process."""
     python = sys.executable
     script = os.path.abspath(sys.argv[0])
     args = [python, script, *sys.argv[1:]]
 
     try:
-        os.execv(python, args)
-    except Exception:
-        # Fallback for environments where execv is blocked
-        try:
-            import subprocess
+        subprocess.Popen(args, cwd=os.getcwd(), env=os.environ.copy())
+    except Exception as exc:
+        print(f"[Restart] Failed to spawn new process: {exc}")
 
-            subprocess.Popen(args, cwd=os.getcwd(), env=os.environ.copy())
-        finally:
-            os._exit(0)
+    try:
+        root = tk._default_root
+        if root is not None:
+            root.quit()
+            root.destroy()
+    except Exception:
+        pass
+
+    # Ensure the current process exits so the window fully closes
+    os._exit(0)
 
 
 def mark_pending_scan():

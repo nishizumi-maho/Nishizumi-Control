@@ -2771,6 +2771,12 @@ class iRacingControlApp:
 
     def scan_driver_controls(self):
         """Scan for dc* driver control variables in current car."""
+        # Preserve any inline (unsaved) bindings so rescans in the same
+        # car/track session don't drop macros/hotkeys
+        previous_pair = (self.current_car, self.current_track)
+        fallback_tabs = {k: v.get_config() for k, v in self.tabs.items()}
+        fallback_combo = self.combo_tab.get_config() if self.combo_tab else {}
+
         with self.ir_lock:
             # Recreate SDK handle to avoid stale sessions between reconnects
             try:
@@ -2902,10 +2908,22 @@ class iRacingControlApp:
 
         self.car_overlay_config[car] = self.saved_presets[car]["_overlay"]
         self.overlay_tab.load_for_car(
-            car, 
-            self.active_vars, 
+            car,
+            self.active_vars,
             self.car_overlay_config[car]
         )
+
+        # Reload saved bindings/macros for this car/track so they remain active
+        preset_data = self.saved_presets[car][track]
+        if preset_data.get("tabs") or preset_data.get("combo"):
+            # Load preset will rebuild tabs with configs and re-register listeners
+            self.load_specific_preset(car, track)
+        else:
+            # Even without saved presets, ensure any current bindings stay active.
+            # If this rescan is for the same car/track, reuse inline config.
+            if (car, track) == previous_pair:
+                self._apply_inline_config(fallback_tabs, fallback_combo)
+            self.register_current_listeners()
 
         self.update_preset_ui()
         self.save_config()
@@ -3186,6 +3204,25 @@ class iRacingControlApp:
             keyboard.unhook_all_hotkeys()
         except Exception:
             pass
+
+    def _apply_inline_config(
+        self,
+        tab_configs: Dict[str, Dict[str, Any]],
+        combo_config: Dict[str, Any]
+    ):
+        """Reapply unsaved tab/combo configuration after a rescan."""
+        for var_name, config in tab_configs.items():
+            if var_name in self.tabs:
+                try:
+                    self.tabs[var_name].set_config(config)
+                except Exception:
+                    pass
+
+        if self.combo_tab and combo_config:
+            try:
+                self.combo_tab.set_config(combo_config)
+            except Exception:
+                pass
 
     def restore_defaults(self):
         """Delete the configuration file and restart the app after confirmation."""

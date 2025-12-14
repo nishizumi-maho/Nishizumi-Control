@@ -288,11 +288,28 @@ class InputManager:
         self.active: bool = False
         self.allowed_devices: List[str] = []
         self.safe_mode: bool = False
+        self.haptics: Dict[int, Any] = {}
+        # Prevent SDL from grabbing exclusive haptics/XInput handles when we only need button input
+        self.preserve_game_ffb: bool = os.getenv("DOMINANTCONTROL_PRESERVE_FFB", "1") == "1"
+        # Gate haptic binding behind an opt-in flag to avoid stealing force feedback
+        self.haptics_allowed: bool = os.getenv("DOMINANTCONTROL_ENABLE_HAPTICS", "0") == "1"
+        self.haptics_enabled: bool = False
 
         if HAS_PYGAME:
             try:
+                if self.preserve_game_ffb:
+                    # Prefer the legacy/direct drivers instead of HIDAPI/XInput to avoid taking over FFB
+                    os.environ.setdefault("SDL_HINT_JOYSTICK_HIDAPI", "0")
+                    os.environ.setdefault("SDL_HINT_XINPUT_ENABLED", "0")
+                    os.environ.setdefault("SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
                 pygame.init()
                 pygame.joystick.init()
+                if self.haptics_allowed and hasattr(pygame, "haptic"):
+                    try:
+                        pygame.haptic.init()
+                        self.haptics_enabled = pygame.haptic.get_init()
+                    except Exception as e:
+                        print(f"[InputManager] Pygame haptics init error: {e}")
                 threading.Thread(target=self._input_loop, daemon=True).start()
             except Exception as e:
                 print(f"[InputManager] Pygame init error: {e}")
@@ -309,6 +326,7 @@ class InputManager:
             if HAS_PYGAME:
                 try:
                     pygame.quit()
+                    self.haptics.clear()
                 except Exception:
                     pass
         else:
@@ -318,6 +336,13 @@ class InputManager:
                         pygame.init()
                     if not pygame.joystick.get_init():
                         pygame.joystick.init()
+                    if (
+                        self.haptics_allowed
+                        and hasattr(pygame, "haptic")
+                        and not pygame.haptic.get_init()
+                    ):
+                        pygame.haptic.init()
+                        self.haptics_enabled = pygame.haptic.get_init()
                 except Exception as e:
                     print(f"[InputManager] Error reactivating pygame: {e}")
 
@@ -330,18 +355,21 @@ class InputManager:
         """
         if self.safe_mode or not HAS_PYGAME:
             return []
-            
+
         try:
-            pygame.joystick.quit()
-            pygame.joystick.init()
+            if not pygame.get_init():
+                pygame.init()
+            if not pygame.joystick.get_init():
+                pygame.joystick.init()
             devices = []
             count = pygame.joystick.get_count()
-            
+
             for i in range(count):
                 try:
                     j = pygame.joystick.Joystick(i)
+                    if not j.get_init():
+                        j.init()
                     devices.append((i, j.get_name()))
-                    j.quit()
                 except Exception:
                     devices.append((i, f"Device {i} (Error)"))
                     
@@ -362,10 +390,20 @@ class InputManager:
 
         self.joysticks.clear()
         self.allowed_devices = list(allowed_names)
+        self.haptics.clear()
 
         try:
-            pygame.joystick.quit()
-            pygame.joystick.init()
+            if not pygame.get_init():
+                pygame.init()
+            if not pygame.joystick.get_init():
+                pygame.joystick.init()
+            if (
+                self.haptics_allowed
+                and hasattr(pygame, "haptic")
+                and not pygame.haptic.get_init()
+            ):
+                pygame.haptic.init()
+                self.haptics_enabled = pygame.haptic.get_init()
 
             for i in range(pygame.joystick.get_count()):
                 j = pygame.joystick.Joystick(i)
@@ -373,11 +411,40 @@ class InputManager:
                     try:
                         j.init()
                         self.joysticks.append(j)
+                        self._attach_haptic(j)
                         print(f"[InputManager] Connected: {j.get_name()}")
                     except Exception:
                         pass
         except Exception:
             pass
+
+    def _attach_haptic(self, joystick):
+        """Ensure a haptic device is opened for the given joystick without interrupting game FFB."""
+        if not self.haptics_allowed or not self.haptics_enabled:
+            return
+
+        try:
+            jid = joystick.get_id()
+            if jid in self.haptics:
+                return
+
+            haptic = pygame.haptic.Haptic(jid)
+
+            # Prefer binding to the existing joystick handle to avoid force-feedback resets
+            try:
+                if hasattr(haptic, "open_from_joystick"):
+                    haptic.open_from_joystick(joystick)
+                else:
+                    haptic.open(jid)
+            except Exception:
+                # Fallback to index-based open if the safer path fails
+                haptic.open(jid)
+
+            # Avoid rumble_init/autocenter calls that can steal control from the sim
+            self.haptics[jid] = haptic
+        except Exception:
+            # If haptic setup fails, keep joystick input alive but skip force feedback binding
+            self.haptics.pop(joystick.get_id(), None)
 
     def _input_loop(self):
         """Background loop to capture joystick events."""

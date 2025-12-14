@@ -28,6 +28,8 @@ import warnings
 import threading
 import subprocess
 import importlib
+import queue
+import numbers
 from typing import Dict, List, Tuple, Optional, Any, Callable
 
 # ======================================================================
@@ -591,29 +593,36 @@ class InputManager:
 
         return captured_code
 
-    def capture_keyboard_scancode(self) -> Tuple[Optional[int], Optional[str]]:
+    def capture_keyboard_scancode(self, timeout: float = 10.0) -> Tuple[Optional[int], Optional[str]]:
         """
-        Capture a keyboard scan code.
-        
+        Capture a keyboard scan code with timeout and cancellation support.
+
         Returns:
             Tuple of (scan_code, key_name) or (None, None) if timeout/cancel
         """
-        # Wait for enter to be released
         while keyboard.is_pressed('enter'):
-            pass
-            
-        start = time.time()
-        while time.time() - start < 10:
-            if keyboard.is_pressed('esc'):
-                return None, "CANCEL"
-                
-            evt = keyboard.read_event(suppress=True)
-            if evt.event_type == 'down':
-                if evt.name == 'esc':
-                    return None, "CANCEL"
-                return evt.scan_code, evt.name
-                
-        return None, None
+            time.sleep(0.05)
+
+        done = threading.Event()
+        result: Dict[str, Optional[Any]] = {"scan": None, "name": None}
+
+        def on_event(e):
+            if e.event_type == 'down':
+                if e.name == 'esc':
+                    result["name"] = "CANCEL"
+                else:
+                    result["scan"] = e.scan_code
+                    result["name"] = e.name
+                done.set()
+
+        hook = keyboard.hook(on_event, suppress=True)
+        done.wait(timeout)
+        keyboard.unhook(hook)
+
+        if result["name"] == "CANCEL":
+            return None, "CANCEL"
+
+        return result["scan"], result["name"]
 
 
 # Global input manager instance
@@ -1024,11 +1033,18 @@ class ScrollableFrame(tk.Frame):
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Mouse wheel support
+        # Mouse wheel support (bind only while hovered)
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        def _bind_mousewheel(_event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        def _unbind_mousewheel(_event):
+            canvas.unbind_all("<MouseWheel>")
+
+        canvas.bind("<Enter>", _bind_mousewheel)
+        canvas.bind("<Leave>", _unbind_mousewheel)
 
 class OverlayConfigTab(tk.Frame):
     """
@@ -1221,7 +1237,7 @@ class OverlayConfigTab(tk.Frame):
             label_entry = tk.Entry(row, width=20)
             label_entry.pack(side="left", padx=2)
             label_entry.insert(
-                0, 
+                0,
                 config.get("label") or var_name.replace("dc", "")
             )
 
@@ -1230,9 +1246,33 @@ class OverlayConfigTab(tk.Frame):
                 "entry": label_entry
             }
 
+            show_var.trace_add(
+                "write",
+                lambda *_args, vn=var_name: self._on_overlay_row_change(vn)
+            )
+            label_entry.bind(
+                "<KeyRelease>",
+                lambda _event, vn=var_name: self._on_overlay_row_change(vn)
+            )
+
         self.app.car_overlay_config[car_name] = overlay_config
         self.app.overlay.rebuild_monitor(overlay_config)
         self.app.save_config()
+
+    def _on_overlay_row_change(self, var_name: str):
+        """Apply live updates when overlay rows change."""
+        car = self.app.current_car or "Generic Car"
+        config = self.app.car_overlay_config.get(car, {})
+        row = self.var_rows.get(var_name)
+        if not row:
+            return
+
+        show = row["show_var"].get()
+        label = row["entry"].get().strip() or var_name.replace("dc", "")
+        config[var_name] = {"show": show, "label": label}
+        self.app.car_overlay_config[car] = config
+        self.app.overlay.rebuild_monitor(config)
+        self.app.schedule_save()
 
     def collect_for_car(self, car_name: str) -> Dict[str, Dict[str, Any]]:
         """
@@ -1385,6 +1425,8 @@ class GenericController:
         short_name = self.var_name.replace("dc", "")
 
         target = self._resolve_target(target)
+        if not self.is_float:
+            target = int(round(target))
 
         if self.update_status:
             self.update_status("Adjusting...", "orange")
@@ -1535,7 +1577,7 @@ class ControlTab(tk.Frame):
         self.app = app
         self.controller = controller
         self.controller.update_status = self.update_status_label
-        self.controller.app_ref = app
+        self.controller.app = app
         self.preset_rows: List[Dict[str, Any]] = []
 
         # Scrollable layout
@@ -1611,14 +1653,12 @@ class ControlTab(tk.Frame):
 
         # Start monitoring loop
         self.running = True
-        threading.Thread(target=self.monitor_loop, daemon=True).start()
+        self.after(500, self.monitor_loop)
 
     def update_status_label(self, text: str, color: str):
         """Update status label."""
-        try:
-            self.lbl_status.config(text=text, fg=color)
-        except Exception:
-            pass
+        if self.app:
+            self.app.ui(self.lbl_status.config, text=text, fg=color)
 
     def run_bot_timing_probe(self):
         """Run a fast timing probe to suggest a stable BOT delay."""
@@ -1650,13 +1690,12 @@ class ControlTab(tk.Frame):
     def set_editing_state(self, enabled: bool):
         """Enable/disable editing based on app mode."""
         state = "normal" if enabled else "readonly"
-        bg = "white" if enabled else "#e6e6e6"
 
         for row in self.preset_rows:
             try:
-                row["entry"].config(state=state, bg=bg)
+                row["entry"].config(state=state)
                 if "voice_entry" in row:
-                    row["voice_entry"].config(state=state, bg=bg)
+                    row["voice_entry"].config(state=state)
             except Exception:
                 pass
 
@@ -1741,20 +1780,20 @@ class ControlTab(tk.Frame):
             fg="red" if is_reset else "black"
         ).pack(side="left")
 
-        value_entry = tk.Entry(frame, width=8)
+        value_entry = ttk.Entry(frame, width=8)
         value_entry.pack(side="left", padx=5)
 
         if self.app.app_state != "CONFIG":
-            value_entry.config(state="readonly", bg="#e6e6e6")
+            value_entry.config(state="readonly")
 
         bind_button = tk.Button(frame, text="Set Bind", width=12)
         bind_button.pack(side="left", padx=5)
 
-        voice_entry = tk.Entry(frame, width=18)
+        voice_entry = ttk.Entry(frame, width=18)
         voice_entry.pack(side="left", padx=5)
         voice_entry.insert(0, "")
         if self.app.app_state != "CONFIG":
-            voice_entry.config(state="readonly", bg="#e6e6e6")
+            voice_entry.config(state="readonly")
 
         row_data = {
             "frame": frame,
@@ -1770,7 +1809,7 @@ class ControlTab(tk.Frame):
             value_entry.delete(0, tk.END)
             value_entry.insert(0, existing.get("val", ""))
             if self.app.app_state != "CONFIG":
-                value_entry.config(state="readonly", bg="#e6e6e6")
+                value_entry.config(state="readonly")
 
             row_data["bind"] = existing.get("bind")
             if row_data["bind"]:
@@ -1784,23 +1823,27 @@ class ControlTab(tk.Frame):
             voice_entry.delete(0, tk.END)
             voice_entry.insert(0, voice_text)
             if self.app.app_state != "CONFIG":
-                voice_entry.config(state="readonly", bg="#e6e6e6")
+                voice_entry.config(state="readonly")
 
         self.preset_rows.append(row_data)
 
     def monitor_loop(self):
         """Background loop to monitor current value."""
-        while self.running:
-            value = self.controller.read_telemetry()
-            if value is None:
-                text = "--"
-            else:
-                text = f"{value:.3f}" if self.controller.is_float else str(value)
-            try:
-                self.lbl_monitor.config(text=f"Current: {text}")
-            except Exception:
-                pass
-            time.sleep(0.5)
+        if not self.running:
+            return
+
+        value = self.controller.read_telemetry()
+        if value is None:
+            text = "--"
+        else:
+            text = f"{value:.3f}" if self.controller.is_float else str(value)
+        try:
+            self.lbl_monitor.config(text=f"Current: {text}")
+        except Exception:
+            pass
+
+        if self.running:
+            self.after(500, self.monitor_loop)
 
     def get_config(self) -> Dict[str, Any]:
         """Get current configuration."""
@@ -1816,11 +1859,18 @@ class ControlTab(tk.Frame):
                     "val": row["entry"].get(),
                     "bind": row["bind"],
                     "is_reset": row.get("is_reset", False),
-                    "voice_phrase": row.get("voice_entry", tk.Entry()).get()
+                    "voice_phrase": (
+                        row.get("voice_entry").get() if row.get("voice_entry") else ""
+                    )
                 }
                 for row in self.preset_rows
             ]
         }
+
+    def destroy(self):  # type: ignore[override]
+        """Ensure monitoring loop stops when widget is destroyed."""
+        self.running = False
+        super().destroy()
 
     def set_config(self, config: Dict[str, Any]):
         """Load configuration."""
@@ -1934,18 +1984,17 @@ class ComboTab(tk.Frame):
     def set_editing_state(self, enabled: bool):
         """Enable/disable editing based on app mode."""
         state = "normal" if enabled else "readonly"
-        bg = "white" if enabled else "#e6e6e6"
 
         for row in self.preset_rows:
             for entry in row["entries"].values():
                 try:
-                    entry.config(state=state, bg=bg)
+                    entry.config(state=state)
                 except Exception:
                     pass
             voice_entry = row.get("voice_entry")
             if voice_entry:
                 try:
-                    voice_entry.config(state=state, bg=bg)
+                    voice_entry.config(state=state)
                 except Exception:
                     pass
 
@@ -1976,8 +2025,8 @@ class ComboTab(tk.Frame):
         button.config(command=on_click)
 
     def add_dynamic_row(
-        self, 
-        existing: Optional[Dict[str, Any]] = None, 
+        self,
+        existing: Optional[Dict[str, Any]] = None,
         is_reset: bool = False
     ):
         """Add a combo preset row."""
@@ -2003,10 +2052,10 @@ class ComboTab(tk.Frame):
 
         # Create entry for each variable
         for var_name in self.var_names:
-            entry = tk.Entry(frame, width=8)
+            entry = ttk.Entry(frame, width=8)
             entry.pack(side="left", padx=2)
             if self.app.app_state != "CONFIG":
-                entry.config(state="readonly", bg="#e6e6e6")
+                entry.config(state="readonly")
             row_data["entries"][var_name] = entry
 
         # Delete button (except for RESET)
@@ -2028,7 +2077,7 @@ class ComboTab(tk.Frame):
                     entry.config(state="normal")
                     entry.insert(0, value)
                     if self.app.app_state != "CONFIG":
-                        entry.config(state="readonly", bg="#e6e6e6")
+                        entry.config(state="readonly")
 
             row_data["bind"] = existing.get("bind")
             if row_data["bind"]:
@@ -2037,12 +2086,12 @@ class ComboTab(tk.Frame):
                 )
                 bind_button.config(text=row_data["bind"], bg=bg_color)
 
-        voice_entry = tk.Entry(frame, width=18)
+        voice_entry = ttk.Entry(frame, width=18)
         voice_entry.pack(side="left", padx=4)
         if existing and existing.get("voice_phrase"):
             voice_entry.insert(0, existing.get("voice_phrase", ""))
         if self.app.app_state != "CONFIG":
-            voice_entry.config(state="readonly", bg="#e6e6e6")
+            voice_entry.config(state="readonly")
         row_data["voice_entry"] = voice_entry
 
         self.preset_rows.append(row_data)
@@ -2069,7 +2118,9 @@ class ComboTab(tk.Frame):
                 "vals": values,
                 "bind": row["bind"],
                 "is_reset": row["is_reset"],
-                "voice_phrase": row.get("voice_entry", tk.Entry()).get()
+                "voice_phrase": (
+                    row.get("voice_entry").get() if row.get("voice_entry") else ""
+                )
             })
         return {"presets": presets_data}
 
@@ -2327,6 +2378,10 @@ class iRacingControlApp:
         self.root.title(f"{APP_NAME} v{APP_VERSION}")
         self.root.geometry("820x900")
 
+        # Thread-safe UI queue
+        self._uiq: "queue.Queue[Tuple[Callable, tuple, dict]]" = queue.Queue()
+        self.root.after(30, self._drain_ui_queue)
+
         # iRacing SDK instance
         self.ir = irsdk.IRSDK()
         self.ir_lock = threading.Lock()
@@ -2353,6 +2408,7 @@ class iRacingControlApp:
         self.last_session_type = ""
         self.scans_since_restart = 0
         self.pending_scan_on_start = False
+        self._last_auto_pair: Tuple[str, str] = ("", "")
 
         # Auto-load tracking
         self.auto_load_attempted: set = set()
@@ -2380,8 +2436,8 @@ class iRacingControlApp:
         # Initialize devices
         self.update_safe_mode()
 
-        # Start background threads
-        threading.Thread(target=self.auto_preset_loop, daemon=True).start()
+        # Start background loops
+        self.root.after(2000, self.auto_preset_loop)
         self.update_overlay_loop()
 
         # Show overlay if it was visible
@@ -2393,6 +2449,24 @@ class iRacingControlApp:
 
         # Honor any pending scan requests (set before a restart)
         self.root.after(200, self._perform_pending_scan)
+
+    def ui(self, fn: Callable, *args, **kwargs):
+        """Thread-safe UI dispatcher."""
+        self._uiq.put((fn, args, kwargs))
+
+    def _drain_ui_queue(self):
+        while True:
+            try:
+                fn, args, kwargs = self._uiq.get_nowait()
+            except queue.Empty:
+                break
+
+            try:
+                fn(*args, **kwargs)
+            except Exception as exc:
+                print(f"[UI] Handler error: {exc}")
+
+        self.root.after(30, self._drain_ui_queue)
 
     def _create_menu(self):
         """Create application menu bar."""
@@ -2624,14 +2698,17 @@ class iRacingControlApp:
 
     def trigger_safe_mode_update(self):
         """Trigger safe mode update with restart."""
-        self.save_config()
+        new_value = self.use_keyboard_only.get()
         if messagebox.askokcancel(
             "Restart Required",
             "Restart is required to apply Keyboard Only mode. Confirm?"
         ):
+            self.save_config()
             restart_program()
         else:
-            self.use_keyboard_only.set(not self.use_keyboard_only.get())
+            self.use_keyboard_only.set(not new_value)
+            self.save_config()
+        self.update_safe_mode()
 
     def open_device_manager(self):
         """Open device management dialog."""
@@ -2804,102 +2881,90 @@ class iRacingControlApp:
 
     def auto_preset_loop(self):
         """Background loop for auto-detecting car/track."""
-        last_pair = ("", "")
+        if not (self.auto_detect.get() or self.auto_restart_on_race.get()):
+            self.root.after(2000, self.auto_preset_loop)
+            return
 
-        while True:
-            time.sleep(2)
-            if not (self.auto_detect.get() or self.auto_restart_on_race.get()):
-                continue
+        try:
+            with self.ir_lock:
+                if not getattr(self.ir, "is_initialized", False):
+                    self.ir.startup()
 
-            try:
-                with self.ir_lock:
-                    # Clean shutdown before startup
-                    try:
-                        self.ir.shutdown()
-                    except Exception:
-                        pass
+            if not getattr(self.ir, "is_initialized", False):
+                self.root.after(2000, self.auto_preset_loop)
+                return
 
-                    # Recreate the SDK handle so controllers don't hold a stale session
-                    self.ir = irsdk.IRSDK()
-                    self._refresh_controller_ir()
+            session_type = self._get_session_type()
+            if self._handle_session_change(session_type):
+                return
 
-                    # Always try to connect
-                    if not self.ir.startup():
-                        continue
+            if not self.auto_detect.get():
+                self.root.after(2000, self.auto_preset_loop)
+                return
 
-                session_type = self._get_session_type()
-                if self._handle_session_change(session_type):
-                    return
+            driver_info = self.ir["DriverInfo"]
+            if not driver_info:
+                self.root.after(2000, self.auto_preset_loop)
+                return
 
-                if not self.auto_detect.get():
-                    continue
+            idx = driver_info["DriverCarIdx"]
+            raw_car = driver_info["Drivers"][idx]["CarScreenName"]
 
-                driver_info = self.ir["DriverInfo"]
-                if not driver_info:
-                    continue
+            weekend = self.ir["WeekendInfo"]
+            if not weekend:
+                self.root.after(2000, self.auto_preset_loop)
+                return
 
-                idx = driver_info["DriverCarIdx"]
-                raw_car = driver_info["Drivers"][idx]["CarScreenName"]
+            raw_track = weekend["TrackDisplayName"]
 
-                weekend = self.ir["WeekendInfo"]
-                if not weekend:
-                    continue
+            # Clean names
+            car_clean = "".join(
+                c for c in raw_car
+                if c.isalnum() or c in " -_"
+            )
+            track_clean = "".join(
+                c for c in raw_track
+                if c.isalnum() or c in " -_"
+            )
 
-                raw_track = weekend["TrackDisplayName"]
+            current_pair = (car_clean, track_clean)
 
-                # Clean names
-                car_clean = "".join(
-                    c for c in raw_car 
-                    if c.isalnum() or c in " -_"
-                )
-                track_clean = "".join(
-                    c for c in raw_track 
-                    if c.isalnum() or c in " -_"
-                )
+            if current_pair != self._last_auto_pair:
+                self._last_auto_pair = current_pair
+                self.current_car, self.current_track = car_clean, track_clean
+                print(f"[AutoDetect] {car_clean} @ {track_clean}")
 
-                current_pair = (car_clean, track_clean)
+                self.auto_fill_ui(car_clean, track_clean)
 
-                if current_pair != last_pair:
-                    last_pair = current_pair
-                    self.current_car, self.current_track = car_clean, track_clean
-                    print(f"[AutoDetect] {car_clean} @ {track_clean}")
+                # Create skeleton if doesn't exist
+                if car_clean not in self.saved_presets:
+                    self.saved_presets[car_clean] = {}
 
-                    self.root.after(
-                        0, 
-                        lambda c=car_clean, t=track_clean: self.auto_fill_ui(c, t)
-                    )
+                if "_overlay" not in self.saved_presets[car_clean]:
+                    self.saved_presets[car_clean]["_overlay"] = \
+                        self.car_overlay_config.get(car_clean, {})
 
-                    # Create skeleton if doesn't exist
-                    if car_clean not in self.saved_presets:
-                        self.saved_presets[car_clean] = {}
+                if track_clean not in self.saved_presets[car_clean]:
+                    self.saved_presets[car_clean][track_clean] = {
+                        "active_vars": None,
+                        "tabs": {},
+                        "combo": {}
+                    }
 
-                    if "_overlay" not in self.saved_presets[car_clean]:
-                        self.saved_presets[car_clean]["_overlay"] = \
-                            self.car_overlay_config.get(car_clean, {})
+                self.save_config()
 
-                    if track_clean not in self.saved_presets[car_clean]:
-                        self.saved_presets[car_clean][track_clean] = {
-                            "active_vars": None,
-                            "tabs": {},
-                            "combo": {}
-                        }
+                # Auto-load once
+                if (car_clean, track_clean) not in self.auto_load_attempted:
+                    self.auto_load_attempted.add((car_clean, track_clean))
+                    if self.saved_presets[car_clean][track_clean].get(
+                        "active_vars"
+                    ):
+                        self.load_specific_preset(car_clean, track_clean)
 
-                    self.save_config()
+        except Exception as e:
+            print(f"[AutoDetect] Error: {e}")
 
-                    # Auto-load once
-                    if (car_clean, track_clean) not in self.auto_load_attempted:
-                        self.auto_load_attempted.add((car_clean, track_clean))
-                        if self.saved_presets[car_clean][track_clean].get(
-                            "active_vars"
-                        ):
-                            self.root.after(
-                                0,
-                                lambda c=car_clean, t=track_clean:
-                                    self.load_specific_preset(c, t)
-                            )
-
-            except Exception as e:
-                print(f"[AutoDetect] Error: {e}")
+        self.root.after(2000, self.auto_preset_loop)
 
     def _get_session_type(self) -> str:
         """Return the current session type if available."""
@@ -3033,11 +3098,13 @@ class iRacingControlApp:
                 if value is None:
                     continue
 
-                # Skip booleans
+                # Skip non-numeric/bool entries
                 if isinstance(value, bool):
                     continue
+                if not isinstance(value, numbers.Real):
+                    continue
 
-                is_float = isinstance(value, float)
+                is_float = (float(value) % 1.0) != 0.0
                 found_vars.append((candidate, is_float))
 
         except Exception as e:
@@ -3126,6 +3193,12 @@ class iRacingControlApp:
         for tab_id in self.notebook.tabs():
             self.notebook.forget(tab_id)
 
+        for tab in self.tabs.values():
+            try:
+                tab.destroy()
+            except Exception:
+                pass
+
         self.controllers.clear()
         self.tabs.clear()
 
@@ -3202,9 +3275,10 @@ class iRacingControlApp:
 
     def notify_overlay_status(self, text: str, color: str):
         """Update overlay status text temporarily."""
-        self.overlay.update_status_text(text, color)
-        self.root.after(
-            2000, 
+        self.ui(self.overlay.update_status_text, text, color)
+        self.ui(
+            self.root.after,
+            2000,
             lambda: self.overlay.update_status_text("HUD Ready", "white")
         )
 
@@ -3247,7 +3321,7 @@ class iRacingControlApp:
 
     def schedule_save(self):
         """Schedule configuration save."""
-        self.save_config()
+        self.ui(self.save_config)
 
     def save_config(self):
         """Save configuration to disk."""

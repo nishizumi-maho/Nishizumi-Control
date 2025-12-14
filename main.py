@@ -289,12 +289,19 @@ class InputManager:
         self.allowed_devices: List[str] = []
         self.safe_mode: bool = False
         self.haptics: Dict[int, Any] = {}
+        # Prevent SDL from grabbing exclusive haptics/XInput handles when we only need button input
+        self.preserve_game_ffb: bool = os.getenv("DOMINANTCONTROL_PRESERVE_FFB", "1") == "1"
         # Gate haptic binding behind an opt-in flag to avoid stealing force feedback
         self.haptics_allowed: bool = os.getenv("DOMINANTCONTROL_ENABLE_HAPTICS", "0") == "1"
         self.haptics_enabled: bool = False
 
         if HAS_PYGAME:
             try:
+                if self.preserve_game_ffb:
+                    # Prefer the legacy/direct drivers instead of HIDAPI/XInput to avoid taking over FFB
+                    os.environ.setdefault("SDL_HINT_JOYSTICK_HIDAPI", "0")
+                    os.environ.setdefault("SDL_HINT_XINPUT_ENABLED", "0")
+                    os.environ.setdefault("SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
                 pygame.init()
                 pygame.joystick.init()
                 if self.haptics_allowed and hasattr(pygame, "haptic"):
@@ -410,6 +417,34 @@ class InputManager:
                         pass
         except Exception:
             pass
+
+    def _attach_haptic(self, joystick):
+        """Ensure a haptic device is opened for the given joystick without interrupting game FFB."""
+        if not self.haptics_allowed or not self.haptics_enabled:
+            return
+
+        try:
+            jid = joystick.get_id()
+            if jid in self.haptics:
+                return
+
+            haptic = pygame.haptic.Haptic(jid)
+
+            # Prefer binding to the existing joystick handle to avoid force-feedback resets
+            try:
+                if hasattr(haptic, "open_from_joystick"):
+                    haptic.open_from_joystick(joystick)
+                else:
+                    haptic.open(jid)
+            except Exception:
+                # Fallback to index-based open if the safer path fails
+                haptic.open(jid)
+
+            # Avoid rumble_init/autocenter calls that can steal control from the sim
+            self.haptics[jid] = haptic
+        except Exception:
+            # If haptic setup fails, keep joystick input alive but skip force feedback binding
+            self.haptics.pop(joystick.get_id(), None)
 
     def _attach_haptic(self, joystick):
         """Ensure a haptic device is opened for the given joystick without interrupting game FFB."""

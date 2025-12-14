@@ -16,7 +16,6 @@ Version: 1.0.0
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, colorchooser
-import threading
 import time
 import ctypes
 import keyboard
@@ -26,6 +25,7 @@ import os
 import sys
 import random
 import warnings
+import threading
 from typing import Dict, List, Tuple, Optional, Any, Callable
 
 # ======================================================================
@@ -2252,6 +2252,7 @@ class iRacingControlApp:
 
         # iRacing SDK instance
         self.ir = irsdk.IRSDK()
+        self.ir_lock = threading.Lock()
 
         # Application state
         self.app_state = "RUNNING"  # "RUNNING" or "CONFIG"
@@ -2325,8 +2326,14 @@ class iRacingControlApp:
             command=self.toggle_overlay
         )
         options_menu.add_command(
-            label="Restart Application", 
+            label="Restart Application",
             command=restart_program
+        )
+
+        options_menu.add_separator()
+        options_menu.add_command(
+            label="Restore Defaults (Delete Config)",
+            command=self.restore_defaults
         )
 
     def _create_main_ui(self):
@@ -2461,14 +2468,11 @@ class iRacingControlApp:
             # Switch to CONFIG
             self.app_state = "CONFIG"
             self.btn_mode.config(
-                text="Mode: CONFIG (Click to Save & Run)", 
+                text="Mode: CONFIG (Click to Save & Run)",
                 bg="orange"
             )
             input_manager.active = False
-            try:
-                keyboard.unhook_all()
-            except Exception:
-                pass
+            self._clear_keyboard_hotkeys()
         else:
             # Switch to RUNNING
             self.app_state = "RUNNING"
@@ -2679,15 +2683,16 @@ class iRacingControlApp:
                 continue
 
             try:
-                # Clean shutdown before startup
-                try:
-                    self.ir.shutdown()
-                except:
-                    pass
+                with self.ir_lock:
+                    # Clean shutdown before startup
+                    try:
+                        self.ir.shutdown()
+                    except Exception:
+                        pass
 
-                # Always try to connect
-                if not self.ir.startup():
-                    continue
+                    # Always try to connect
+                    if not self.ir.startup():
+                        continue
 
                 driver_info = self.ir["DriverInfo"]
                 if not driver_info:
@@ -2749,7 +2754,7 @@ class iRacingControlApp:
                         ):
                             self.root.after(
                                 0,
-                                lambda c=car_clean, t=track_clean: 
+                                lambda c=car_clean, t=track_clean:
                                     self.load_specific_preset(c, t)
                             )
 
@@ -2758,19 +2763,22 @@ class iRacingControlApp:
 
     def scan_driver_controls(self):
         """Scan for dc* driver control variables in current car."""
-        # Clean shutdown before startup
-        try:
-            self.ir.shutdown()
-        except:
-            pass
+        with self.ir_lock:
+            # Recreate SDK handle to avoid stale sessions between reconnects
+            try:
+                self.ir.shutdown()
+            except Exception:
+                pass
 
-        # Always try to connect
-        if not self.ir.startup():
-            messagebox.showerror(
-                "Error", 
-                "Open iRacing (or enter a session)."
-            )
-            return
+            self.ir = irsdk.IRSDK()
+
+            # Always try to connect
+            if not self.ir.startup():
+                messagebox.showerror(
+                    "Error",
+                    "Open iRacing (or enter a session)."
+                )
+                return
 
         found_vars = []
 
@@ -3077,11 +3085,7 @@ class iRacingControlApp:
 
     def register_current_listeners(self):
         """Register keyboard/joystick listeners based on current config."""
-        try:
-            keyboard.unhook_all()
-        except Exception:
-            pass
-
+        self._clear_keyboard_hotkeys()
         input_manager.listeners.clear()
 
         # Register individual tab presets
@@ -3109,7 +3113,8 @@ class iRacingControlApp:
 
                 if bind.startswith("KEY:"):
                     key_name = bind.split(":", 1)[1].lower()
-                    keyboard.add_hotkey(key_name, make_action())
+                    handle = keyboard.add_hotkey(key_name, make_action())
+                    self._hotkey_handles.append(handle)
                 else:
                     input_manager.listeners[bind] = make_action()
 
@@ -3144,11 +3149,53 @@ class iRacingControlApp:
 
                 if bind.startswith("KEY:"):
                     key_name = bind.split(":", 1)[1].lower()
-                    keyboard.add_hotkey(key_name, combo_action)
+                    handle = keyboard.add_hotkey(key_name, combo_action)
+                    self._hotkey_handles.append(handle)
                 else:
                     input_manager.listeners[bind] = combo_action
 
         input_manager.active = (self.app_state == "RUNNING")
+
+    def _clear_keyboard_hotkeys(self):
+        """Remove all keyboard hotkeys registered by the app."""
+        if not hasattr(self, "_hotkey_handles"):
+            self._hotkey_handles: List[Any] = []
+
+        for handle in self._hotkey_handles:
+            try:
+                keyboard.remove_hotkey(handle)
+            except Exception:
+                pass
+        self._hotkey_handles.clear()
+
+        try:
+            keyboard.unhook_all_hotkeys()
+        except Exception:
+            pass
+
+    def restore_defaults(self):
+        """Delete the configuration file and restart the app after confirmation."""
+        if not messagebox.askyesno(
+            "Restore Defaults",
+            "This will delete your configuration file and restart the app. Continue?"
+        ):
+            return
+
+        try:
+            if os.path.exists(CONFIG_FILE):
+                os.remove(CONFIG_FILE)
+        except Exception as exc:
+            messagebox.showerror(
+                "Error",
+                f"Failed to delete config: {exc}"
+            )
+            return
+
+        messagebox.showinfo(
+            "Defaults Restored",
+            "Configuration reset. The application will restart now."
+        )
+        restart_program()
 
 
 # ======================================================================

@@ -1181,10 +1181,7 @@ class GenericController:
             Current value or None if unavailable
         """
         try:
-            if self.app and hasattr(self.app, "_ensure_iracing_connected"):
-                if not self.app._ensure_iracing_connected():
-                    return None
-            elif not getattr(self.ir, "is_initialized", False):
+            if not getattr(self.ir, "is_initialized", False):
                 try:
                     self.ir.startup()
                 except Exception:
@@ -2439,34 +2436,24 @@ class iRacingControlApp:
             self.combo_track.set("")
             self.current_track = ""
 
-    def _ensure_iracing_connected(self) -> bool:
-        """Ensure the IRSDK connection is alive without disrupting active actions."""
-        try:
-            if not getattr(self.ir, "is_initialized", False):
-                return bool(self.ir.startup())
-
-            is_connected = getattr(self.ir, "is_connected", True)
-            if not is_connected:
-                self.ir.shutdown()
-                return bool(self.ir.startup())
-
-            return True
-        except Exception as e:
-            print(f"[iRacing] Connection check failed: {e}")
-            return False
-
     def auto_preset_loop(self):
         """Background loop for auto-detecting car/track."""
         last_pair = ("", "")
-
+        
         while True:
             time.sleep(2)
             if not self.auto_detect.get():
                 continue
 
             try:
-                # Avoid tearing down the SDK pipe on every poll; reconnect only if needed
-                if not self._ensure_iracing_connected():
+                # Clean shutdown before startup
+                try:
+                    self.ir.shutdown()
+                except:
+                    pass
+
+                # Always try to connect
+                if not self.ir.startup():
                     continue
 
                 driver_info = self.ir["DriverInfo"]
@@ -2484,11 +2471,11 @@ class iRacingControlApp:
 
                 # Clean names
                 car_clean = "".join(
-                    c for c in raw_car
+                    c for c in raw_car 
                     if c.isalnum() or c in " -_"
                 )
                 track_clean = "".join(
-                    c for c in raw_track
+                    c for c in raw_track 
                     if c.isalnum() or c in " -_"
                 )
 
@@ -2500,7 +2487,7 @@ class iRacingControlApp:
                     print(f"[AutoDetect] {car_clean} @ {track_clean}")
 
                     self.root.after(
-                        0,
+                        0, 
                         lambda c=car_clean, t=track_clean: self.auto_fill_ui(c, t)
                     )
 
@@ -2529,7 +2516,7 @@ class iRacingControlApp:
                         ):
                             self.root.after(
                                 0,
-                                lambda c=car_clean, t=track_clean:
+                                lambda c=car_clean, t=track_clean: 
                                     self.load_specific_preset(c, t)
                             )
 

@@ -61,6 +61,7 @@ BASE_PATH = os.getenv("APPDATA") or os.path.expanduser("~")
 CONFIG_FOLDER = os.path.join(BASE_PATH, APP_FOLDER, "configs")
 os.makedirs(CONFIG_FOLDER, exist_ok=True)
 CONFIG_FILE = os.path.join(CONFIG_FOLDER, "config_v3.json")
+PENDING_SCAN_FILE = os.path.join(CONFIG_FOLDER, "pending_scan.flag")
 
 # Timing profiles for input simulation (click-click timing)
 GLOBAL_TIMING = {
@@ -90,7 +91,41 @@ if not os.path.exists(CONFIG_FILE):
 def restart_program():
     """Restart the application."""
     python = sys.executable
-    os.execl(python, python, *sys.argv)
+    script = os.path.abspath(sys.argv[0])
+    args = [python, script, *sys.argv[1:]]
+
+    try:
+        os.execv(python, args)
+    except Exception:
+        # Fallback for environments where execv is blocked
+        try:
+            import subprocess
+
+            subprocess.Popen(args, cwd=os.getcwd(), env=os.environ.copy())
+        finally:
+            os._exit(0)
+
+
+def mark_pending_scan():
+    """Persist a marker so the next launch triggers a rescan."""
+    try:
+        with open(PENDING_SCAN_FILE, "w", encoding="utf-8") as flag:
+            flag.write("rescan")
+    except Exception as exc:
+        print(f"[PendingScan] Failed to persist marker: {exc}")
+
+
+def consume_pending_scan() -> bool:
+    """Return True if a persisted rescan marker was present and clear it."""
+    if not os.path.exists(PENDING_SCAN_FILE):
+        return False
+
+    try:
+        os.remove(PENDING_SCAN_FILE)
+    except Exception as exc:
+        print(f"[PendingScan] Failed to clear marker: {exc}")
+
+    return True
 
 
 # ======================================================================
@@ -2723,6 +2758,7 @@ class iRacingControlApp:
 
             if self.auto_restart_on_race.get() and new_type == "Race":
                 self.pending_scan_on_start = True
+                mark_pending_scan()
                 self.save_config()
                 restart_program()
                 return True
@@ -2733,6 +2769,7 @@ class iRacingControlApp:
         """Scan for dc* driver control variables in current car."""
         if self.auto_restart_on_rescan.get() and self.scans_since_restart >= 1:
             self.pending_scan_on_start = True
+            mark_pending_scan()
             self.save_config()
             restart_program()
             return
@@ -3018,6 +3055,9 @@ class iRacingControlApp:
 
     def _perform_pending_scan(self):
         """Execute a deferred scan request set before restarting."""
+        if consume_pending_scan():
+            self.pending_scan_on_start = True
+
         if self.pending_scan_on_start:
             self.pending_scan_on_start = False
             self.save_config()

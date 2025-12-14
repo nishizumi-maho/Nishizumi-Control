@@ -27,6 +27,7 @@ import random
 import warnings
 import threading
 import subprocess
+import importlib
 from typing import Dict, List, Tuple, Optional, Any, Callable
 
 # ======================================================================
@@ -51,6 +52,15 @@ try:
 except ImportError:
     HAS_TTS = False
     print("Warning: 'pyttsx3' not installed. TTS disabled.")
+
+_speech_spec = importlib.util.find_spec("speech_recognition")
+if _speech_spec is not None:
+    import speech_recognition as sr
+    HAS_SPEECH = True
+else:
+    sr = None
+    HAS_SPEECH = False
+    print("Warning: 'speech_recognition' not installed. Voice triggers disabled.")
 
 # ======================================================================
 # GLOBAL CONFIGURATION
@@ -608,6 +618,115 @@ class InputManager:
 
 # Global input manager instance
 input_manager = InputManager()
+
+
+# ======================================================================
+# VOICE LISTENER (Windows Speech Recognition via speech_recognition)
+# ======================================================================
+class VoiceListener:
+    """
+    Lightweight voice trigger engine backed by Windows speech recognition.
+
+    Uses the `speech_recognition` package with the default Windows recognizer
+    (SAPI). Falls back to other recognizers if unavailable.
+    """
+
+    def __init__(self):
+        self.available = HAS_SPEECH
+        self.recognizer = sr.Recognizer() if HAS_SPEECH else None
+        self.callbacks: Dict[str, Callable] = {}
+        self.running = False
+        self.thread: Optional[threading.Thread] = None
+        self.lock = threading.Lock()
+
+    def set_phrases(self, phrases: Dict[str, Callable]):
+        """Replace the phrase→callback map."""
+        with self.lock:
+            self.callbacks = {k.strip().lower(): v for k, v in phrases.items() if k}
+
+    def set_enabled(self, enabled: bool):
+        """Start or stop the listener based on user preference."""
+        if not self.available:
+            self.stop()
+            return
+
+        if enabled and self.callbacks:
+            self.start()
+        else:
+            self.stop()
+
+    def start(self):
+        if self.running or not self.available:
+            return
+
+        self.running = True
+        self.thread = threading.Thread(target=self._listen_loop, daemon=True)
+        self.thread.start()
+
+    def stop(self):
+        self.running = False
+
+    def _recognize_text(self, audio) -> Optional[str]:
+        """Try multiple engines to convert audio to text."""
+        if not self.recognizer:
+            return None
+
+        engines = []
+        if hasattr(self.recognizer, "recognize_sapi"):
+            engines.append(self.recognizer.recognize_sapi)
+        if hasattr(self.recognizer, "recognize_sphinx"):
+            engines.append(self.recognizer.recognize_sphinx)
+        engines.append(self.recognizer.recognize_google)
+
+        for engine in engines:
+            try:
+                return engine(audio)
+            except Exception:
+                continue
+
+        return None
+
+    def _listen_loop(self):
+        if not self.recognizer:
+            return
+
+        try:
+            with sr.Microphone() as source:
+                try:
+                    self.recognizer.adjust_for_ambient_noise(source, duration=0.4)
+                except Exception:
+                    pass
+
+                while self.running:
+                    try:
+                        audio = self.recognizer.listen(
+                            source,
+                            timeout=1,
+                            phrase_time_limit=4
+                        )
+                    except getattr(sr, "WaitTimeoutError", Exception):
+                        continue
+                    except Exception:
+                        continue
+
+                    text = self._recognize_text(audio)
+                    if not text:
+                        continue
+
+                    phrase = text.strip().lower()
+                    if not phrase:
+                        continue
+
+                    with self.lock:
+                        cb = self.callbacks.get(phrase)
+
+                    if cb:
+                        threading.Thread(target=cb, daemon=True).start()
+        except Exception as exc:
+            print(f"[Voice] Listener stopped: {exc}")
+
+
+voice_listener = VoiceListener()
 
 
 # ======================================================================
@@ -1536,6 +1655,8 @@ class ControlTab(tk.Frame):
         for row in self.preset_rows:
             try:
                 row["entry"].config(state=state, bg=bg)
+                if "voice_entry" in row:
+                    row["voice_entry"].config(state=state, bg=bg)
             except Exception:
                 pass
 
@@ -1629,11 +1750,18 @@ class ControlTab(tk.Frame):
         bind_button = tk.Button(frame, text="Set Bind", width=12)
         bind_button.pack(side="left", padx=5)
 
+        voice_entry = tk.Entry(frame, width=18)
+        voice_entry.pack(side="left", padx=5)
+        voice_entry.insert(0, "")
+        if self.app.app_state != "CONFIG":
+            voice_entry.config(state="readonly", bg="#e6e6e6")
+
         row_data = {
             "frame": frame,
             "entry": value_entry,
             "bind": None,
-            "is_reset": is_reset
+            "is_reset": is_reset,
+            "voice_entry": voice_entry
         }
         self._config_bind_button(bind_button, row_data)
 
@@ -1650,6 +1778,13 @@ class ControlTab(tk.Frame):
                     "#90ee90" if "JOY" in row_data["bind"] else "#ADD8E6"
                 )
                 bind_button.config(text=row_data["bind"], bg=bg_color)
+
+            voice_text = existing.get("voice_phrase", "")
+            voice_entry.config(state="normal")
+            voice_entry.delete(0, tk.END)
+            voice_entry.insert(0, voice_text)
+            if self.app.app_state != "CONFIG":
+                voice_entry.config(state="readonly", bg="#e6e6e6")
 
         self.preset_rows.append(row_data)
 
@@ -1680,7 +1815,8 @@ class ControlTab(tk.Frame):
                 {
                     "val": row["entry"].get(),
                     "bind": row["bind"],
-                    "is_reset": row.get("is_reset", False)
+                    "is_reset": row.get("is_reset", False),
+                    "voice_phrase": row.get("voice_entry", tk.Entry()).get()
                 }
                 for row in self.preset_rows
             ]
@@ -1806,6 +1942,12 @@ class ComboTab(tk.Frame):
                     entry.config(state=state, bg=bg)
                 except Exception:
                     pass
+            voice_entry = row.get("voice_entry")
+            if voice_entry:
+                try:
+                    voice_entry.config(state=state, bg=bg)
+                except Exception:
+                    pass
 
     def _config_bind_button(self, button: tk.Button, data_store: Dict[str, Any]):
         """Configure binding button behavior."""
@@ -1851,10 +1993,11 @@ class ComboTab(tk.Frame):
         bind_button.pack(side="left", padx=2)
 
         row_data = {
-            "frame": frame, 
-            "entries": {}, 
-            "bind": None, 
-            "is_reset": is_reset
+            "frame": frame,
+            "entries": {},
+            "bind": None,
+            "is_reset": is_reset,
+            "voice_entry": None
         }
         self._config_bind_button(bind_button, row_data)
 
@@ -1894,6 +2037,14 @@ class ComboTab(tk.Frame):
                 )
                 bind_button.config(text=row_data["bind"], bg=bg_color)
 
+        voice_entry = tk.Entry(frame, width=18)
+        voice_entry.pack(side="left", padx=4)
+        if existing and existing.get("voice_phrase"):
+            voice_entry.insert(0, existing.get("voice_phrase", ""))
+        if self.app.app_state != "CONFIG":
+            voice_entry.config(state="readonly", bg="#e6e6e6")
+        row_data["voice_entry"] = voice_entry
+
         self.preset_rows.append(row_data)
 
     def remove_row(self, row_data: Dict[str, Any]):
@@ -1911,13 +2062,14 @@ class ComboTab(tk.Frame):
         presets_data = []
         for row in self.preset_rows:
             values = {
-                var_name: entry.get() 
+                var_name: entry.get()
                 for var_name, entry in row["entries"].items()
             }
             presets_data.append({
                 "vals": values,
                 "bind": row["bind"],
-                "is_reset": row["is_reset"]
+                "is_reset": row["is_reset"],
+                "voice_phrase": row.get("voice_entry", tk.Entry()).get()
             })
         return {"presets": presets_data}
 
@@ -2213,6 +2365,7 @@ class iRacingControlApp:
         # Settings
         self.use_keyboard_only = tk.BooleanVar(value=False)
         self.use_tts = tk.BooleanVar(value=False)
+        self.use_voice = tk.BooleanVar(value=False)
         self.auto_detect = tk.BooleanVar(value=True)
         self.auto_restart_on_rescan = tk.BooleanVar(value=True)
         self.auto_restart_on_race = tk.BooleanVar(value=True)
@@ -2310,6 +2463,23 @@ class iRacingControlApp:
                 text="Voice (TTS)",
                 variable=self.use_tts
             ).pack(side="right")
+
+        voice_check = tk.Checkbutton(
+            settings_frame,
+            text="Voice Triggers",
+            variable=self.use_voice,
+            state=("normal" if HAS_SPEECH else "disabled"),
+            command=self.register_current_listeners
+        )
+        voice_check.pack(side="right", padx=6)
+
+        if not HAS_SPEECH:
+            tk.Label(
+                settings_frame,
+                text="(Install 'speech_recognition' for voice)",
+                fg="gray",
+                font=("Arial", 8)
+            ).pack(side="right", padx=4)
 
         # Auto-detect
         auto_frame = tk.Frame(self.root)
@@ -2426,6 +2596,7 @@ class iRacingControlApp:
             )
             input_manager.active = False
             self._clear_keyboard_hotkeys()
+            voice_listener.set_enabled(False)
         else:
             # Switch to RUNNING
             self.app_state = "RUNNING"
@@ -3090,6 +3261,7 @@ class iRacingControlApp:
             "hud_style": self.overlay.style_cfg,
             "use_keyboard_only": self.use_keyboard_only.get(),
             "use_tts": self.use_tts.get(),
+            "use_voice": self.use_voice.get(),
             "auto_detect": self.auto_detect.get(),
             "auto_restart_on_rescan": self.auto_restart_on_rescan.get(),
             "auto_restart_on_race": self.auto_restart_on_race.get(),
@@ -3129,6 +3301,7 @@ class iRacingControlApp:
 
         self.use_keyboard_only.set(data.get("use_keyboard_only", False))
         self.use_tts.set(data.get("use_tts", False))
+        self.use_voice.set(data.get("use_voice", False))
         self.auto_detect.set(data.get("auto_detect", True))
         self.auto_restart_on_rescan.set(data.get("auto_restart_on_rescan", True))
         self.auto_restart_on_race.set(data.get("auto_restart_on_race", True))
@@ -3146,6 +3319,7 @@ class iRacingControlApp:
         """Register keyboard/joystick listeners based on current config."""
         self._clear_keyboard_hotkeys()
         input_manager.listeners.clear()
+        voice_phrases: Dict[str, Callable] = {}
 
         # Register individual tab presets
         for var_name, tab in self.tabs.items():
@@ -3165,17 +3339,22 @@ class iRacingControlApp:
 
                 def make_action(ctrl=controller, tgt=target):
                     return lambda: threading.Thread(
-                        target=ctrl.adjust_to_target, 
-                        args=(tgt,), 
+                        target=ctrl.adjust_to_target,
+                        args=(tgt,),
                         daemon=True
                     ).start()
 
+                action = make_action()
                 if bind.startswith("KEY:"):
                     key_name = bind.split(":", 1)[1].lower()
-                    handle = keyboard.add_hotkey(key_name, make_action())
+                    handle = keyboard.add_hotkey(key_name, action)
                     self._hotkey_handles.append(handle)
                 else:
-                    input_manager.listeners[bind] = make_action()
+                    input_manager.listeners[bind] = action
+
+                phrase = preset.get("voice_phrase", "").strip().lower()
+                if phrase:
+                    voice_phrases[phrase] = action
 
         # Register combo presets
         if self.combo_tab:
@@ -3206,14 +3385,26 @@ class iRacingControlApp:
                                 daemon=True
                             ).start()
 
+                action = combo_action
                 if bind.startswith("KEY:"):
                     key_name = bind.split(":", 1)[1].lower()
-                    handle = keyboard.add_hotkey(key_name, combo_action)
+                    handle = keyboard.add_hotkey(key_name, action)
                     self._hotkey_handles.append(handle)
                 else:
-                    input_manager.listeners[bind] = combo_action
+                    input_manager.listeners[bind] = action
+
+                phrase = preset.get("voice_phrase", "").strip().lower()
+                if phrase:
+                    voice_phrases[phrase] = action
 
         input_manager.active = (self.app_state == "RUNNING")
+        if self.app_state != "RUNNING":
+            voice_listener.set_enabled(False)
+        elif self.use_voice.get():
+            voice_listener.set_phrases(voice_phrases)
+            voice_listener.set_enabled(True)
+        else:
+            voice_listener.set_enabled(False)
 
     def _refresh_controller_ir(self):
         """Ensure all controllers use the latest IRSDK handle."""

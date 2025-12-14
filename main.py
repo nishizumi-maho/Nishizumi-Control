@@ -402,6 +402,7 @@ class InputManager:
             pass
 
     def _attach_haptic(self, joystick):
+        """Ensure a haptic device is opened for the given joystick without interrupting game FFB."""
         """Ensure a haptic device is opened for the given joystick."""
         if not self.haptics_enabled:
             return
@@ -412,6 +413,18 @@ class InputManager:
                 return
 
             haptic = pygame.haptic.Haptic(jid)
+
+            # Prefer binding to the existing joystick handle to avoid force-feedback resets
+            try:
+                if hasattr(haptic, "open_from_joystick"):
+                    haptic.open_from_joystick(joystick)
+                else:
+                    haptic.open(jid)
+            except Exception:
+                # Fallback to index-based open if the safer path fails
+                haptic.open(jid)
+
+            # Avoid rumble_init/autocenter calls that can steal control from the sim
             haptic.open(jid)
 
             try:

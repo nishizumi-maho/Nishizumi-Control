@@ -228,8 +228,8 @@ def _compute_timing(is_float: bool = False) -> Tuple[float, float]:
     profile = timing_cfg.get("profile", "aggressive")
 
     if profile == "aggressive":
-        press_ms = 40
-        interval_ms = 40
+        press_ms = 10
+        interval_ms = 10
     elif profile == "casual":
         press_ms = 80
         interval_ms = 100
@@ -1262,6 +1262,61 @@ class GenericController:
         except Exception:
             return None
 
+    def _detect_float_step(self) -> Optional[float]:
+        """Detect the minimal float increment by pulsing once and restoring."""
+        if not self.is_float:
+            return None
+        if not self.key_increase or not self.key_decrease:
+            return None
+
+        baseline = self.read_telemetry()
+        if baseline is None:
+            return None
+
+        # Pulse upward and measure the delta
+        click_pulse(self.key_increase, is_float=True)
+        time.sleep(0.08)
+        raised = self.read_telemetry()
+
+        if raised is None:
+            return None
+
+        step = abs(float(raised) - float(baseline))
+
+        # Try to return near the starting point
+        click_pulse(self.key_decrease, is_float=True)
+        time.sleep(0.08)
+
+        if step < 1e-6:
+            return None
+
+        return step
+
+    def _resolve_target(self, target: float) -> float:
+        """Align float targets to the nearest reachable increment when needed."""
+        if not self.is_float:
+            return target
+
+        step = self._detect_float_step()
+        current = self.read_telemetry()
+
+        if step is None or step <= 0 or current is None:
+            return target
+
+        aligned = current + round((target - current) / step) * step
+
+        if abs(aligned - target) >= 0.0005:
+            if self.update_status:
+                self.update_status(f"Rounded to {aligned:.3f}", "orange")
+            if self.app:
+                short_name = self.var_name.replace("dc", "")
+                self.app.notify_overlay_status(
+                    f"{short_name}: using {aligned:.3f} (nearest)",
+                    "orange"
+                )
+
+        return aligned
+
     def adjust_to_target(self, target: float):
         """
         Adjust variable to target value using discrete key presses.
@@ -1284,6 +1339,8 @@ class GenericController:
 
         self.running_action = True
         short_name = self.var_name.replace("dc", "")
+
+        target = self._resolve_target(target)
 
         if self.update_status:
             self.update_status("Adjusting...", "orange")

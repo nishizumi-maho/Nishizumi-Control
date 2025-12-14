@@ -64,7 +64,7 @@ CONFIG_FILE = os.path.join(CONFIG_FOLDER, "config_v3.json")
 
 # Timing profiles for input simulation (click-click timing)
 GLOBAL_TIMING = {
-    "profile": "aggressive",  # "aggressive", "casual", "relaxed", "custom"
+    "profile": "aggressive",  # "aggressive", "casual", "relaxed", "custom", "bot"
     # Custom profile settings:
     "press_min_ms": 60,
     "press_max_ms": 80,
@@ -177,6 +177,43 @@ def release_key(scan_code: int):
     ctypes.windll.user32.SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
 
 
+def _normalize_timing_config(timing: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Sanitize timing configuration and ensure required keys exist.
+
+    Args:
+        timing: Raw timing configuration dictionary.
+
+    Returns:
+        A sanitized copy with validated bounds and known profiles.
+    """
+    normalized = dict(GLOBAL_TIMING)
+    if not isinstance(timing, dict):
+        return normalized
+
+    normalized.update(timing)
+
+    allowed_profiles = {"aggressive", "casual", "relaxed", "custom", "bot"}
+    if normalized.get("profile") not in allowed_profiles:
+        normalized["profile"] = "aggressive"
+
+    for key in [
+        "press_min_ms",
+        "press_max_ms",
+        "interval_min_ms",
+        "interval_max_ms",
+        "random_range_ms"
+    ]:
+        try:
+            normalized[key] = max(1, int(normalized.get(key, GLOBAL_TIMING[key])))
+        except (TypeError, ValueError, KeyError):
+            normalized[key] = GLOBAL_TIMING.get(key, 10)
+
+    normalized["random_enabled"] = bool(normalized.get("random_enabled", False))
+
+    return normalized
+
+
 def _compute_timing(is_float: bool = False) -> Tuple[float, float]:
     """
     Compute press and interval timing based on global profile.
@@ -187,36 +224,41 @@ def _compute_timing(is_float: bool = False) -> Tuple[float, float]:
     Returns:
         Tuple of (press_time_seconds, interval_time_seconds)
     """
-    profile = GLOBAL_TIMING.get("profile", "aggressive")
+    timing_cfg = _normalize_timing_config(GLOBAL_TIMING)
+    profile = timing_cfg.get("profile", "aggressive")
 
     if profile == "aggressive":
-        press_ms = 40
-        interval_ms = 40
+        press_ms = 10
+        interval_ms = 10
     elif profile == "casual":
         press_ms = 80
         interval_ms = 100
     elif profile == "relaxed":
         press_ms = 150
         interval_ms = 200
+    elif profile == "bot":
+        press_ms = 1
+        interval_ms = 1
     else:  # custom
-        p_min = GLOBAL_TIMING.get("press_min_ms", 60)
-        p_max = GLOBAL_TIMING.get("press_max_ms", 80)
-        i_min = GLOBAL_TIMING.get("interval_min_ms", 60)
-        i_max = GLOBAL_TIMING.get("interval_max_ms", 90)
+        p_min = timing_cfg.get("press_min_ms", 60)
+        p_max = timing_cfg.get("press_max_ms", 80)
+        i_min = timing_cfg.get("interval_min_ms", 60)
+        i_max = timing_cfg.get("interval_max_ms", 90)
         press_ms = random.uniform(p_min, p_max)
         interval_ms = random.uniform(i_min, i_max)
 
-        if GLOBAL_TIMING.get("random_enabled", False):
-            rng = GLOBAL_TIMING.get("random_range_ms", 10)
+        if timing_cfg.get("random_enabled", False):
+            rng = timing_cfg.get("random_range_ms", 10)
             press_ms += random.uniform(-rng, rng)
             interval_ms += random.uniform(-rng, rng)
 
-    # Ensure minimum values
-    press_ms = max(10, press_ms)
-    interval_ms = max(10, interval_ms)
+    # Ensure minimum values, allowing extremely low latency for bot mode
+    min_value = 1 if profile == "bot" else 10
+    press_ms = max(min_value, press_ms)
+    interval_ms = max(min_value, interval_ms)
 
-    # Add extra delay for float variables
-    if is_float:
+    # Add extra delay for float variables unless running bot profile
+    if is_float and profile != "bot":
         press_ms += 30
 
     return press_ms / 1000.0, interval_ms / 1000.0
@@ -241,6 +283,28 @@ def click_pulse(scan_code: Optional[int], is_float: bool = False):
         time.sleep(t_interval)
     except Exception as e:
         print(f"[click_pulse] Error: {e}")
+
+
+def _direct_pulse(scan_code: Optional[int], press_ms: int, interval_ms: int):
+    """
+    Execute a single key press pulse with explicit timing overrides.
+
+    Args:
+        scan_code: The keyboard scan code to pulse.
+        press_ms: Duration to hold the key in milliseconds.
+        interval_ms: Post-release interval in milliseconds.
+    """
+    if not scan_code:
+        return
+
+    try:
+        code = int(scan_code)
+        press_key(code)
+        time.sleep(max(1, press_ms) / 1000.0)
+        release_key(code)
+        time.sleep(max(1, interval_ms) / 1000.0)
+    except Exception as e:
+        print(f"[_direct_pulse] Error: {e}")
 
 
 def speak_text(text: str):
@@ -1198,6 +1262,61 @@ class GenericController:
         except Exception:
             return None
 
+    def _detect_float_step(self) -> Optional[float]:
+        """Detect the minimal float increment by pulsing once and restoring."""
+        if not self.is_float:
+            return None
+        if not self.key_increase or not self.key_decrease:
+            return None
+
+        baseline = self.read_telemetry()
+        if baseline is None:
+            return None
+
+        # Pulse upward and measure the delta
+        click_pulse(self.key_increase, is_float=True)
+        time.sleep(0.08)
+        raised = self.read_telemetry()
+
+        if raised is None:
+            return None
+
+        step = abs(float(raised) - float(baseline))
+
+        # Try to return near the starting point
+        click_pulse(self.key_decrease, is_float=True)
+        time.sleep(0.08)
+
+        if step < 1e-6:
+            return None
+
+        return step
+
+    def _resolve_target(self, target: float) -> float:
+        """Align float targets to the nearest reachable increment when needed."""
+        if not self.is_float:
+            return target
+
+        step = self._detect_float_step()
+        current = self.read_telemetry()
+
+        if step is None or step <= 0 or current is None:
+            return target
+
+        aligned = current + round((target - current) / step) * step
+
+        if abs(aligned - target) >= 0.0005:
+            if self.update_status:
+                self.update_status(f"Rounded to {aligned:.3f}", "orange")
+            if self.app:
+                short_name = self.var_name.replace("dc", "")
+                self.app.notify_overlay_status(
+                    f"{short_name}: using {aligned:.3f} (nearest)",
+                    "orange"
+                )
+
+        return aligned
+
     def adjust_to_target(self, target: float):
         """
         Adjust variable to target value using discrete key presses.
@@ -1220,6 +1339,8 @@ class GenericController:
 
         self.running_action = True
         short_name = self.var_name.replace("dc", "")
+
+        target = self._resolve_target(target)
 
         if self.update_status:
             self.update_status("Adjusting...", "orange")
@@ -1286,6 +1407,76 @@ class GenericController:
 
             self.running_action = False
 
+    def find_minimum_effective_timing(
+        self,
+        start_ms: int = 1,
+        max_ms: int = 120,
+        step_ms: int = 1,
+        settle_s: float = 0.05,
+        confirmation_attempts: int = 2
+    ) -> Optional[int]:
+        """
+        Probe the minimal pulse timing that reliably updates telemetry.
+
+        The probe fires fast pulses starting at ``start_ms`` and increments by
+        ``step_ms`` until telemetry reflects a change. The first timing that
+        consistently registers is returned.
+
+        Args:
+            start_ms: Initial press/interval duration in milliseconds.
+            max_ms: Maximum duration to test in milliseconds.
+            step_ms: Increment between attempts in milliseconds.
+            settle_s: Delay after a pulse to allow telemetry to settle.
+            confirmation_attempts: Number of retries per timing bucket.
+
+        Returns:
+            Suggested minimal working pulse duration in milliseconds, or None
+            if no timing within bounds registers.
+        """
+        if not self.key_increase or not self.key_decrease:
+            raise ValueError("Increase/decrease keys must be configured before probing.")
+
+        baseline = self.read_telemetry()
+        if baseline is None:
+            return None
+
+        def _changed(old, new) -> bool:
+            if old is None or new is None:
+                return False
+            if self.is_float:
+                return abs(float(new) - float(old)) >= 0.0005
+            return int(round(new)) != int(round(old))
+
+        def _restore(target_value: float, timing_ms: int):
+            """Attempt to revert telemetry back near baseline after a test."""
+            for _ in range(5):
+                current = self.read_telemetry()
+                if current is None:
+                    break
+                if not _changed(target_value, current):
+                    break
+                direction = self.key_decrease if current > target_value else self.key_increase
+                _direct_pulse(direction, timing_ms, timing_ms)
+                time.sleep(settle_s)
+
+        for delay_ms in range(max(1, start_ms), max_ms + 1, max(1, step_ms)):
+            success_count = 0
+            for _ in range(max(1, confirmation_attempts)):
+                _direct_pulse(self.key_increase, delay_ms, delay_ms)
+                time.sleep(settle_s)
+                updated = self.read_telemetry()
+                if _changed(baseline, updated):
+                    success_count += 1
+                else:
+                    break
+
+            _restore(baseline, delay_ms)
+
+            if success_count >= confirmation_attempts:
+                return delay_ms
+
+        return None
+
 
 # ======================================================================
 # CONTROL TAB
@@ -1330,6 +1521,13 @@ class ControlTab(tk.Frame):
             command=lambda: self.bind_game_key("decrease")
         )
         self.btn_decrease.pack(side="left", expand=True, fill="x", padx=2)
+
+        tk.Button(
+            keys_frame,
+            text="Test BOT timing",
+            command=self.run_bot_timing_probe,
+            bg="#f0f8ff"
+        ).pack(side="left", padx=2)
 
         # Current value monitor
         self.lbl_monitor = tk.Label(
@@ -1377,6 +1575,33 @@ class ControlTab(tk.Frame):
             self.lbl_status.config(text=text, fg=color)
         except Exception:
             pass
+
+    def run_bot_timing_probe(self):
+        """Run a fast timing probe to suggest a stable BOT delay."""
+
+        def _worker():
+            try:
+                suggested = self.controller.find_minimum_effective_timing()
+            except ValueError as exc:
+                self.after(0, lambda: messagebox.showerror("Keys Missing", str(exc)))
+                return
+
+            if suggested is None:
+                self.after(
+                    0,
+                    lambda: messagebox.showwarning(
+                        "Probe Result",
+                        "No timing within 1-120 ms reliably updated telemetry."
+                    )
+                )
+            else:
+                msg = (
+                    f"Minimal stable pulse detected at ~{suggested} ms.\n"
+                    "Apply this value to BOT/custom timings for reliable updates."
+                )
+                self.after(0, lambda: messagebox.showinfo("Probe Result", msg))
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def set_editing_state(self, enabled: bool):
         """Enable/disable editing based on app mode."""
@@ -1849,6 +2074,14 @@ class GlobalTimingWindow(tk.Toplevel):
             text="😎 Relaxed (well-spaced)",
             variable=self.var_profile,
             value="relaxed",
+            command=self._on_profile_change
+        ).pack(anchor="w", padx=5, pady=2)
+
+        tk.Radiobutton(
+            profiles_frame,
+            text="🤖 BOT (experimental, near-zero delay)",
+            variable=self.var_profile,
+            value="bot",
             command=self._on_profile_change
         ).pack(anchor="w", padx=5, pady=2)
 
@@ -2777,7 +3010,7 @@ class iRacingControlApp:
 
     def save_timing_config(self, new_timing: Dict[str, Any]):
         """Save timing configuration."""
-        GLOBAL_TIMING.update(new_timing)
+        GLOBAL_TIMING.update(_normalize_timing_config(new_timing))
         self.save_config()
 
     def schedule_save(self):
@@ -2821,7 +3054,9 @@ class iRacingControlApp:
         except Exception:
             return
 
-        GLOBAL_TIMING = data.get("global_timing", GLOBAL_TIMING)
+        GLOBAL_TIMING = _normalize_timing_config(
+            data.get("global_timing", GLOBAL_TIMING)
+        )
 
         style = data.get("hud_style")
         if style:

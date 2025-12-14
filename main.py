@@ -2157,6 +2157,9 @@ class iRacingControlApp:
         # Current car and track
         self.current_car = ""
         self.current_track = ""
+        self.last_session_type = ""
+        self.scans_since_restart = 0
+        self.pending_scan_on_start = False
 
         # Auto-load tracking
         self.auto_load_attempted: set = set()
@@ -2170,6 +2173,8 @@ class iRacingControlApp:
         self.use_keyboard_only = tk.BooleanVar(value=False)
         self.use_tts = tk.BooleanVar(value=False)
         self.auto_detect = tk.BooleanVar(value=True)
+        self.auto_restart_on_rescan = tk.BooleanVar(value=True)
+        self.auto_restart_on_race = tk.BooleanVar(value=True)
 
         # Load configuration
         self.load_config()
@@ -2191,6 +2196,9 @@ class iRacingControlApp:
 
         # Activate input manager
         input_manager.active = (self.app_state == "RUNNING")
+
+        # Honor any pending scan requests (set before a restart)
+        self.root.after(200, self._perform_pending_scan)
 
     def _create_menu(self):
         """Create application menu bar."""
@@ -2271,6 +2279,26 @@ class iRacingControlApp:
             text="Auto-detect Car/Track via iRacing",
             variable=self.auto_detect
         ).pack(anchor="w")
+
+        stability_frame = tk.LabelFrame(
+            self.root,
+            text="Stability Options"
+        )
+        stability_frame.pack(fill="x", padx=10, pady=5)
+
+        tk.Checkbutton(
+            stability_frame,
+            text="Restart before rescanning controls (after the first scan)",
+            variable=self.auto_restart_on_rescan,
+            command=self.schedule_save
+        ).pack(anchor="w", pady=2)
+
+        tk.Checkbutton(
+            stability_frame,
+            text="Auto-restart and scan when joining a Race session",
+            variable=self.auto_restart_on_race,
+            command=self.schedule_save
+        ).pack(anchor="w", pady=2)
 
         # Car/Track manager
         presets_frame = tk.LabelFrame(self.root, text="Car → Track Manager")
@@ -2560,10 +2588,10 @@ class iRacingControlApp:
     def auto_preset_loop(self):
         """Background loop for auto-detecting car/track."""
         last_pair = ("", "")
-        
+
         while True:
             time.sleep(2)
-            if not self.auto_detect.get():
+            if not (self.auto_detect.get() or self.auto_restart_on_race.get()):
                 continue
 
             try:
@@ -2581,6 +2609,13 @@ class iRacingControlApp:
                     # Always try to connect
                     if not self.ir.startup():
                         continue
+
+                session_type = self._get_session_type()
+                if self._handle_session_change(session_type):
+                    return
+
+                if not self.auto_detect.get():
+                    continue
 
                 driver_info = self.ir["DriverInfo"]
                 if not driver_info:
@@ -2649,8 +2684,59 @@ class iRacingControlApp:
             except Exception as e:
                 print(f"[AutoDetect] Error: {e}")
 
+    def _get_session_type(self) -> str:
+        """Return the current session type if available."""
+        try:
+            session_info = self.ir["SessionInfo"]
+        except Exception:
+            return ""
+
+        session_num = None
+        try:
+            session_num = int(self.ir["SessionNum"])
+        except Exception:
+            pass
+
+        try:
+            sessions = session_info.get("Sessions") if session_info else None
+            if isinstance(sessions, list):
+                if session_num is not None and 0 <= session_num < len(sessions):
+                    session_type = sessions[session_num].get("SessionType", "")
+                    if session_type:
+                        return session_type
+
+                for entry in sessions:
+                    session_type = entry.get("SessionType", "")
+                    if session_type:
+                        return session_type
+        except Exception:
+            pass
+
+        return ""
+
+    def _handle_session_change(self, session_type: str) -> bool:
+        """Handle session transitions and restart if entering a race."""
+        new_type = session_type or ""
+
+        if new_type != self.last_session_type:
+            self.last_session_type = new_type
+
+            if self.auto_restart_on_race.get() and new_type == "Race":
+                self.pending_scan_on_start = True
+                self.save_config()
+                restart_program()
+                return True
+
+        return False
+
     def scan_driver_controls(self):
         """Scan for dc* driver control variables in current car."""
+        if self.auto_restart_on_rescan.get() and self.scans_since_restart >= 1:
+            self.pending_scan_on_start = True
+            self.save_config()
+            restart_program()
+            return
+
         # Preserve any inline (unsaved) bindings so rescans in the same
         # car/track session don't drop macros/hotkeys
         previous_pair = (self.current_car, self.current_track)
@@ -2808,6 +2894,8 @@ class iRacingControlApp:
         self.update_preset_ui()
         self.save_config()
 
+        self.scans_since_restart += 1
+
         messagebox.showinfo(
             "Scan",
             f"{len(clean_vars)} 'dc' controls configured for this car."
@@ -2928,6 +3016,13 @@ class iRacingControlApp:
         GLOBAL_TIMING.update(_normalize_timing_config(new_timing))
         self.save_config()
 
+    def _perform_pending_scan(self):
+        """Execute a deferred scan request set before restarting."""
+        if self.pending_scan_on_start:
+            self.pending_scan_on_start = False
+            self.save_config()
+            self.root.after(50, self.scan_driver_controls)
+
     def schedule_save(self):
         """Schedule configuration save."""
         self.save_config()
@@ -2945,6 +3040,9 @@ class iRacingControlApp:
             "use_keyboard_only": self.use_keyboard_only.get(),
             "use_tts": self.use_tts.get(),
             "auto_detect": self.auto_detect.get(),
+            "auto_restart_on_rescan": self.auto_restart_on_rescan.get(),
+            "auto_restart_on_race": self.auto_restart_on_race.get(),
+            "pending_scan_on_start": self.pending_scan_on_start,
             "allowed_devices": input_manager.allowed_devices,
             "saved_presets": self.saved_presets,
             "car_overlay_config": self.car_overlay_config,
@@ -2981,6 +3079,9 @@ class iRacingControlApp:
         self.use_keyboard_only.set(data.get("use_keyboard_only", False))
         self.use_tts.set(data.get("use_tts", False))
         self.auto_detect.set(data.get("auto_detect", True))
+        self.auto_restart_on_rescan.set(data.get("auto_restart_on_rescan", True))
+        self.auto_restart_on_race.set(data.get("auto_restart_on_race", True))
+        self.pending_scan_on_start = data.get("pending_scan_on_start", False)
 
         input_manager.allowed_devices = data.get("allowed_devices", [])
 

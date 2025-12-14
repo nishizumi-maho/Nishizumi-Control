@@ -403,6 +403,7 @@ class InputManager:
 
     def _attach_haptic(self, joystick):
         """Ensure a haptic device is opened for the given joystick without interrupting game FFB."""
+        """Ensure a haptic device is opened for the given joystick."""
         if not self.haptics_enabled:
             return
 
@@ -424,6 +425,14 @@ class InputManager:
                 haptic.open(jid)
 
             # Avoid rumble_init/autocenter calls that can steal control from the sim
+            haptic.open(jid)
+
+            try:
+                if hasattr(haptic, "rumble_init"):
+                    haptic.rumble_init()
+            except Exception:
+                pass
+
             self.haptics[jid] = haptic
         except Exception:
             # If haptic setup fails, keep joystick input alive but skip force feedback binding

@@ -469,9 +469,13 @@ class InputManager:
                 pygame.haptic.init()
                 self.haptics_enabled = pygame.haptic.get_init()
 
+            if not self.allowed_devices:
+                # No devices have been approved yet
+                return
+
             for i in range(pygame.joystick.get_count()):
                 j = pygame.joystick.Joystick(i)
-                if not self.allowed_devices or j.get_name() in self.allowed_devices:
+                if j.get_name() in self.allowed_devices:
                     try:
                         j.init()
                         self.joysticks.append(j)
@@ -723,8 +727,8 @@ class DeviceSelector(tk.Toplevel):
             if current_allowed:
                 var.set(name in current_allowed)
             else:
-                # First time: allow all
-                var.set(True)
+                # First run defaults to nothing selected
+                var.set(False)
 
             chk = tk.Checkbutton(
                 self.frame_list, 
@@ -1524,7 +1528,7 @@ class ControlTab(tk.Frame):
 
         tk.Button(
             keys_frame,
-            text="Test BOT timing",
+            text="Test custom minimal time",
             command=self.run_bot_timing_probe,
             bg="#f0f8ff"
         ).pack(side="left", padx=2)

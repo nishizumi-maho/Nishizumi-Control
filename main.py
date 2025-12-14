@@ -2694,6 +2694,10 @@ class iRacingControlApp:
                     except Exception:
                         pass
 
+                    # Recreate the SDK handle so controllers don't hold a stale session
+                    self.ir = irsdk.IRSDK()
+                    self._refresh_controller_ir()
+
                     # Always try to connect
                     if not self.ir.startup():
                         continue
@@ -2775,6 +2779,7 @@ class iRacingControlApp:
                 pass
 
             self.ir = irsdk.IRSDK()
+            self._refresh_controller_ir()
 
             # Always try to connect
             if not self.ir.startup():
@@ -3159,6 +3164,11 @@ class iRacingControlApp:
                     input_manager.listeners[bind] = combo_action
 
         input_manager.active = (self.app_state == "RUNNING")
+
+    def _refresh_controller_ir(self):
+        """Ensure all controllers use the latest IRSDK handle."""
+        for controller in self.controllers.values():
+            controller.ir = self.ir
 
     def _clear_keyboard_hotkeys(self):
         """Remove all keyboard hotkeys registered by the app."""

@@ -64,7 +64,7 @@ CONFIG_FILE = os.path.join(CONFIG_FOLDER, "config_v3.json")
 
 # Timing profiles for input simulation (click-click timing)
 GLOBAL_TIMING = {
-    "profile": "aggressive",  # "aggressive", "casual", "relaxed", "custom"
+    "profile": "aggressive",  # "aggressive", "casual", "relaxed", "custom", "bot"
     # Custom profile settings:
     "press_min_ms": 60,
     "press_max_ms": 80,
@@ -177,6 +177,43 @@ def release_key(scan_code: int):
     ctypes.windll.user32.SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
 
 
+def _normalize_timing_config(timing: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Sanitize timing configuration and ensure required keys exist.
+
+    Args:
+        timing: Raw timing configuration dictionary.
+
+    Returns:
+        A sanitized copy with validated bounds and known profiles.
+    """
+    normalized = dict(GLOBAL_TIMING)
+    if not isinstance(timing, dict):
+        return normalized
+
+    normalized.update(timing)
+
+    allowed_profiles = {"aggressive", "casual", "relaxed", "custom", "bot"}
+    if normalized.get("profile") not in allowed_profiles:
+        normalized["profile"] = "aggressive"
+
+    for key in [
+        "press_min_ms",
+        "press_max_ms",
+        "interval_min_ms",
+        "interval_max_ms",
+        "random_range_ms"
+    ]:
+        try:
+            normalized[key] = max(1, int(normalized.get(key, GLOBAL_TIMING[key])))
+        except (TypeError, ValueError, KeyError):
+            normalized[key] = GLOBAL_TIMING.get(key, 10)
+
+    normalized["random_enabled"] = bool(normalized.get("random_enabled", False))
+
+    return normalized
+
+
 def _compute_timing(is_float: bool = False) -> Tuple[float, float]:
     """
     Compute press and interval timing based on global profile.
@@ -187,7 +224,8 @@ def _compute_timing(is_float: bool = False) -> Tuple[float, float]:
     Returns:
         Tuple of (press_time_seconds, interval_time_seconds)
     """
-    profile = GLOBAL_TIMING.get("profile", "aggressive")
+    timing_cfg = _normalize_timing_config(GLOBAL_TIMING)
+    profile = timing_cfg.get("profile", "aggressive")
 
     if profile == "aggressive":
         press_ms = 40
@@ -198,25 +236,29 @@ def _compute_timing(is_float: bool = False) -> Tuple[float, float]:
     elif profile == "relaxed":
         press_ms = 150
         interval_ms = 200
+    elif profile == "bot":
+        press_ms = 1
+        interval_ms = 1
     else:  # custom
-        p_min = GLOBAL_TIMING.get("press_min_ms", 60)
-        p_max = GLOBAL_TIMING.get("press_max_ms", 80)
-        i_min = GLOBAL_TIMING.get("interval_min_ms", 60)
-        i_max = GLOBAL_TIMING.get("interval_max_ms", 90)
+        p_min = timing_cfg.get("press_min_ms", 60)
+        p_max = timing_cfg.get("press_max_ms", 80)
+        i_min = timing_cfg.get("interval_min_ms", 60)
+        i_max = timing_cfg.get("interval_max_ms", 90)
         press_ms = random.uniform(p_min, p_max)
         interval_ms = random.uniform(i_min, i_max)
 
-        if GLOBAL_TIMING.get("random_enabled", False):
-            rng = GLOBAL_TIMING.get("random_range_ms", 10)
+        if timing_cfg.get("random_enabled", False):
+            rng = timing_cfg.get("random_range_ms", 10)
             press_ms += random.uniform(-rng, rng)
             interval_ms += random.uniform(-rng, rng)
 
-    # Ensure minimum values
-    press_ms = max(10, press_ms)
-    interval_ms = max(10, interval_ms)
+    # Ensure minimum values, allowing extremely low latency for bot mode
+    min_value = 1 if profile == "bot" else 10
+    press_ms = max(min_value, press_ms)
+    interval_ms = max(min_value, interval_ms)
 
-    # Add extra delay for float variables
-    if is_float:
+    # Add extra delay for float variables unless running bot profile
+    if is_float and profile != "bot":
         press_ms += 30
 
     return press_ms / 1000.0, interval_ms / 1000.0
@@ -1854,6 +1896,14 @@ class GlobalTimingWindow(tk.Toplevel):
 
         tk.Radiobutton(
             profiles_frame,
+            text="🤖 BOT (experimental, near-zero delay)",
+            variable=self.var_profile,
+            value="bot",
+            command=self._on_profile_change
+        ).pack(anchor="w", padx=5, pady=2)
+
+        tk.Radiobutton(
+            profiles_frame,
             text="🛠 Custom (define values below)",
             variable=self.var_profile,
             value="custom",
@@ -2777,7 +2827,7 @@ class iRacingControlApp:
 
     def save_timing_config(self, new_timing: Dict[str, Any]):
         """Save timing configuration."""
-        GLOBAL_TIMING.update(new_timing)
+        GLOBAL_TIMING.update(_normalize_timing_config(new_timing))
         self.save_config()
 
     def schedule_save(self):
@@ -2821,7 +2871,9 @@ class iRacingControlApp:
         except Exception:
             return
 
-        GLOBAL_TIMING = data.get("global_timing", GLOBAL_TIMING)
+        GLOBAL_TIMING = _normalize_timing_config(
+            data.get("global_timing", GLOBAL_TIMING)
+        )
 
         style = data.get("hud_style")
         if style:

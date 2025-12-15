@@ -227,6 +227,25 @@ if RAW_INPUT_AVAILABLE:
         ctypes.c_long, ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint, ctypes.c_long
     )
 
+    # Python 3.10 on Windows may lack WNDCLASSW in ctypes.wintypes; define it
+    # manually when absent so Raw Input window creation works.
+    try:
+        WNDCLASSW = ctypes.wintypes.WNDCLASSW
+    except AttributeError:
+        class WNDCLASSW(ctypes.Structure):
+            _fields_ = [
+                ("style", ctypes.c_uint),
+                ("lpfnWndProc", WNDPROCTYPE),
+                ("cbClsExtra", ctypes.c_int),
+                ("cbWndExtra", ctypes.c_int),
+                ("hInstance", ctypes.wintypes.HINSTANCE),
+                ("hIcon", ctypes.wintypes.HICON),
+                ("hCursor", ctypes.wintypes.HCURSOR),
+                ("hbrBackground", ctypes.wintypes.HBRUSH),
+                ("lpszMenuName", ctypes.wintypes.LPCWSTR),
+                ("lpszClassName", ctypes.wintypes.LPCWSTR),
+            ]
+
 
 
 # ======================================================================
@@ -829,7 +848,7 @@ class RawInputBackend:
                 user32.PostQuitMessage(0)
             return user32.DefWindowProcW(hwnd, msg, w_param, l_param)
 
-        wnd_class = ctypes.wintypes.WNDCLASSW()
+        wnd_class = WNDCLASSW()
         wnd_class.lpfnWndProc = _wnd_proc
         wnd_class.lpszClassName = wnd_class_name
         atom = user32.RegisterClassW(ctypes.byref(wnd_class))

@@ -15,7 +15,7 @@ Version: 1.0.0
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog, colorchooser, filedialog
+from tkinter import ttk, messagebox, colorchooser, filedialog
 import time
 import ctypes
 import keyboard
@@ -2248,7 +2248,11 @@ class ControlTab(tk.Frame):
             try:
                 suggested = self.controller.find_minimum_effective_timing()
             except ValueError as exc:
-                self.after(0, lambda: messagebox.showerror("Keys Missing", str(exc)))
+                error_msg = str(exc)
+                self.after(
+                    0,
+                    lambda msg=error_msg: messagebox.showerror("Keys Missing", msg)
+                )
                 return
 
             if suggested is None:
@@ -4921,7 +4925,7 @@ def main():
     """Main application entry point."""
     try:
         root = tk.Tk()
-        app = iRacingControlApp(root)
+        iRacingControlApp(root)
         root.mainloop()
     except Exception as e:
         print(f"Fatal Error: {e}")

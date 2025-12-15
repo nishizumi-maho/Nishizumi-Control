@@ -108,6 +108,16 @@ _TTS_THREAD: Optional[threading.Thread] = None
 _TTS_QUEUE: "queue.Queue[str]" = queue.Queue()
 _TTS_LOCK = threading.Lock()
 
+# Voice tuning defaults (speech recognition responsiveness/accuracy)
+VOICE_TUNING_DEFAULTS = {
+    "ambient_duration": 0.2,        # Time to calibrate ambient noise
+    "initial_timeout": 1.0,         # First listen timeout (seconds)
+    "continuous_timeout": 0.8,      # Subsequent listen timeout (seconds)
+    "phrase_time_limit": 1.2,       # Max length of each phrase (seconds)
+    "energy_threshold": None,       # Static mic threshold (None = auto)
+    "dynamic_energy": True          # Auto-adjust mic threshold
+}
+
 # Initialize config file if it doesn't exist
 if not os.path.exists(CONFIG_FILE):
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -741,6 +751,16 @@ class VoiceListener:
         self.vosk_model_path: str = ""
         self.vosk_model: Optional[Any] = None
         self._vosk_error: Optional[str] = None
+        self.ambient_duration = VOICE_TUNING_DEFAULTS["ambient_duration"]
+        self.initial_timeout = VOICE_TUNING_DEFAULTS["initial_timeout"]
+        self.continuous_timeout = VOICE_TUNING_DEFAULTS["continuous_timeout"]
+        self.phrase_time_limit = VOICE_TUNING_DEFAULTS["phrase_time_limit"]
+        self.energy_threshold: Optional[float] = VOICE_TUNING_DEFAULTS[
+            "energy_threshold"
+        ]
+        self.dynamic_energy = VOICE_TUNING_DEFAULTS["dynamic_energy"]
+        if self.recognizer:
+            self._apply_recognizer_settings(self.recognizer)
 
     def set_phrases(self, phrases: Dict[str, Callable]):
         """Replace the phrase→callback map."""
@@ -780,6 +800,56 @@ class VoiceListener:
         else:
             self.vosk_model = None
             self._vosk_error = None
+
+    def _apply_recognizer_settings(self, recognizer):
+        """Apply tuning values to a speech_recognition.Recognizer."""
+
+        try:
+            recognizer.dynamic_energy_threshold = self.dynamic_energy
+            if self.energy_threshold is not None:
+                recognizer.energy_threshold = self.energy_threshold
+        except Exception:
+            pass
+
+    def update_tuning(self, tuning: Dict[str, Any]):
+        """Update microphone/recognition tuning parameters."""
+
+        def _safe_float(value: Any, default: float) -> float:
+            try:
+                return float(value)
+            except Exception:
+                return default
+
+        self.ambient_duration = max(
+            0.0, _safe_float(tuning.get("ambient_duration"), self.ambient_duration)
+        )
+        self.initial_timeout = _safe_float(
+            tuning.get("initial_timeout"), self.initial_timeout
+        )
+        self.continuous_timeout = _safe_float(
+            tuning.get("continuous_timeout"), self.continuous_timeout
+        )
+        self.phrase_time_limit = _safe_float(
+            tuning.get("phrase_time_limit"), self.phrase_time_limit
+        )
+
+        threshold_val = tuning.get("energy_threshold")
+        try:
+            self.energy_threshold = (
+                float(threshold_val) if threshold_val not in {None, ""} else None
+            )
+        except Exception:
+            self.energy_threshold = None
+
+        self.dynamic_energy = bool(tuning.get("dynamic_energy", self.dynamic_energy))
+
+        self._noise_adjusted = False
+
+        if self.recognizer:
+            self._apply_recognizer_settings(self.recognizer)
+        elif HAS_SPEECH and sr is not None:
+            self.recognizer = sr.Recognizer()
+            self._apply_recognizer_settings(self.recognizer)
 
     def _init_vosk_model(self, model_path: str):
         """Load the Vosk model from disk if available."""
@@ -845,11 +915,12 @@ class VoiceListener:
 
         try:
             with sr.Microphone() as source:
+                self._apply_recognizer_settings(self.recognizer)
                 if not self._noise_adjusted:
                     try:
                         self.recognizer.adjust_for_ambient_noise(
                             source,
-                            duration=0.2
+                            duration=self.ambient_duration
                         )
                         self._noise_adjusted = True
                     except Exception:
@@ -858,19 +929,28 @@ class VoiceListener:
                 # Provide a slightly longer initial wait so the user can start
                 # speaking before the listener times out, then use a steady
                 # shorter timeout to avoid long blocking periods.
-                listen_timeout = 1.0
+                listen_timeout = (
+                    self.initial_timeout if self.initial_timeout > 0 else None
+                )
+                phrase_limit = (
+                    self.phrase_time_limit if self.phrase_time_limit > 0 else None
+                )
 
                 while self.running:
                     try:
                         audio = self.recognizer.listen(
                             source,
                             timeout=listen_timeout,
-                            phrase_time_limit=1.2
+                            phrase_time_limit=phrase_limit
                         )
                         # After the first capture, keep a shorter timeout to
                         # remain responsive while still avoiding premature
                         # timeouts on slower environments.
-                        listen_timeout = 0.8
+                        listen_timeout = (
+                            self.continuous_timeout
+                            if self.continuous_timeout > 0
+                            else listen_timeout
+                        )
                     except getattr(sr, "WaitTimeoutError", Exception):
                         continue
                     except Exception:
@@ -894,8 +974,8 @@ class VoiceListener:
 
     def capture_once(
         self,
-        timeout: float = 1.0,
-        phrase_time_limit: float = 1.2
+        timeout: Optional[float] = None,
+        phrase_time_limit: Optional[float] = None
     ) -> Tuple[Optional[str], Optional[str]]:
         """Capture a single voice input for testing purposes."""
 
@@ -903,18 +983,34 @@ class VoiceListener:
             return None, "Voice recognition not available."
 
         recognizer = sr.Recognizer()
+        self._apply_recognizer_settings(recognizer)
 
         try:
             with sr.Microphone() as source:
                 try:
-                    recognizer.adjust_for_ambient_noise(source, duration=0.2)
+                    recognizer.adjust_for_ambient_noise(
+                        source,
+                        duration=self.ambient_duration
+                    )
                 except Exception:
                     pass
 
                 audio = recognizer.listen(
                     source,
-                    timeout=timeout,
-                    phrase_time_limit=phrase_time_limit
+                    timeout=(
+                        timeout
+                        if timeout is not None
+                        else (self.initial_timeout if self.initial_timeout > 0 else None)
+                    ),
+                    phrase_time_limit=(
+                        phrase_time_limit
+                        if phrase_time_limit is not None
+                        else (
+                            self.phrase_time_limit
+                            if self.phrase_time_limit > 0
+                            else None
+                        )
+                    )
                 )
         except Exception as exc:  # noqa: BLE001
             return None, str(exc)
@@ -2753,6 +2849,22 @@ class iRacingControlApp:
         self.use_voice = tk.BooleanVar(value=False)
         self.voice_engine = tk.StringVar(value="speech")
         self.vosk_model_path = tk.StringVar(value="")
+        self.voice_ambient_duration = tk.DoubleVar(
+            value=VOICE_TUNING_DEFAULTS["ambient_duration"]
+        )
+        self.voice_initial_timeout = tk.DoubleVar(
+            value=VOICE_TUNING_DEFAULTS["initial_timeout"]
+        )
+        self.voice_continuous_timeout = tk.DoubleVar(
+            value=VOICE_TUNING_DEFAULTS["continuous_timeout"]
+        )
+        self.voice_phrase_time_limit = tk.DoubleVar(
+            value=VOICE_TUNING_DEFAULTS["phrase_time_limit"]
+        )
+        self.voice_energy_threshold = tk.StringVar(value="")
+        self.voice_dynamic_energy = tk.BooleanVar(
+            value=VOICE_TUNING_DEFAULTS["dynamic_energy"]
+        )
         self.auto_detect = tk.BooleanVar(value=True)
         self.auto_restart_on_rescan = tk.BooleanVar(value=True)
         self.auto_restart_on_race = tk.BooleanVar(value=True)
@@ -2782,6 +2894,67 @@ class iRacingControlApp:
 
         # Honor any pending scan requests (set before a restart)
         self.root.after(200, self._perform_pending_scan)
+
+    def _voice_tuning_config(self) -> Dict[str, Any]:
+        """Return sanitized voice tuning configuration from the UI."""
+
+        def _safe_float(var: Any, default: float) -> float:
+            try:
+                return float(var.get())
+            except Exception:
+                return default
+
+        energy_raw = self.voice_energy_threshold.get().strip()
+        try:
+            energy_val = float(energy_raw) if energy_raw else None
+        except Exception:
+            energy_val = None
+
+        return {
+            "ambient_duration": max(
+                0.0,
+                _safe_float(
+                    self.voice_ambient_duration,
+                    VOICE_TUNING_DEFAULTS["ambient_duration"]
+                )
+            ),
+            "initial_timeout": max(
+                0.0,
+                _safe_float(
+                    self.voice_initial_timeout,
+                    VOICE_TUNING_DEFAULTS["initial_timeout"]
+                )
+            ),
+            "continuous_timeout": max(
+                0.0,
+                _safe_float(
+                    self.voice_continuous_timeout,
+                    VOICE_TUNING_DEFAULTS["continuous_timeout"]
+                )
+            ),
+            "phrase_time_limit": max(
+                0.0,
+                _safe_float(
+                    self.voice_phrase_time_limit,
+                    VOICE_TUNING_DEFAULTS["phrase_time_limit"]
+                )
+            ),
+            "energy_threshold": energy_val,
+            "dynamic_energy": self.voice_dynamic_energy.get()
+        }
+
+    def apply_voice_tuning(self, persist: bool = False):
+        """Send current tuning settings to the listener and optionally save."""
+
+        tuning = self._voice_tuning_config()
+        voice_listener.update_tuning(tuning)
+        if persist:
+            self.schedule_save()
+
+    def on_voice_tuning_changed(self, *_):
+        """Propagate UI changes to the listener and persist them."""
+
+        self.apply_voice_tuning(persist=True)
 
     def ui(self, fn: Callable, *args, **kwargs):
         """Thread-safe UI dispatcher."""
@@ -2930,6 +3103,87 @@ class iRacingControlApp:
             textvariable=self.vosk_status_var,
             fg="gray"
         ).pack(side="left", padx=6)
+
+        tuning_frame = tk.LabelFrame(
+            self.root,
+            text="Ajustes de Voz (precisão e velocidade)"
+        )
+        tuning_frame.pack(fill="x", padx=10, pady=(0, 5))
+
+        tuning_row_1 = tk.Frame(tuning_frame)
+        tuning_row_1.pack(fill="x", padx=6, pady=2)
+
+        ttk.Label(tuning_row_1, text="Ruído ambiente (s):").pack(side="left")
+        ttk.Spinbox(
+            tuning_row_1,
+            from_=0.0,
+            to=3.0,
+            increment=0.1,
+            width=6,
+            textvariable=self.voice_ambient_duration
+        ).pack(side="left", padx=4)
+
+        ttk.Label(tuning_row_1, text="Duração máx. da frase (s):").pack(side="left")
+        ttk.Spinbox(
+            tuning_row_1,
+            from_=0.2,
+            to=6.0,
+            increment=0.1,
+            width=6,
+            textvariable=self.voice_phrase_time_limit
+        ).pack(side="left", padx=4)
+
+        tk.Checkbutton(
+            tuning_row_1,
+            text="Energia dinâmica (auto)",
+            variable=self.voice_dynamic_energy
+        ).pack(side="left", padx=8)
+
+        tuning_row_2 = tk.Frame(tuning_frame)
+        tuning_row_2.pack(fill="x", padx=6, pady=2)
+
+        ttk.Label(tuning_row_2, text="Timeout inicial (s):").pack(side="left")
+        ttk.Spinbox(
+            tuning_row_2,
+            from_=0.0,
+            to=5.0,
+            increment=0.1,
+            width=6,
+            textvariable=self.voice_initial_timeout
+        ).pack(side="left", padx=4)
+
+        ttk.Label(tuning_row_2, text="Timeout contínuo (s):").pack(side="left")
+        ttk.Spinbox(
+            tuning_row_2,
+            from_=0.0,
+            to=5.0,
+            increment=0.1,
+            width=6,
+            textvariable=self.voice_continuous_timeout
+        ).pack(side="left", padx=4)
+
+        ttk.Label(tuning_row_2, text="Energia mínima: ").pack(side="left")
+        ttk.Entry(
+            tuning_row_2,
+            width=8,
+            textvariable=self.voice_energy_threshold
+        ).pack(side="left", padx=4)
+        tk.Label(
+            tuning_row_2,
+            text="(vazio = automático)",
+            fg="gray",
+            font=("Arial", 8)
+        ).pack(side="left", padx=2)
+
+        for var in (
+            self.voice_ambient_duration,
+            self.voice_phrase_time_limit,
+            self.voice_initial_timeout,
+            self.voice_continuous_timeout,
+            self.voice_energy_threshold,
+            self.voice_dynamic_energy
+        ):
+            var.trace_add("write", self.on_voice_tuning_changed)
 
         # Auto-detect
         auto_frame = tk.Frame(self.root)
@@ -3719,6 +3973,7 @@ class iRacingControlApp:
             "use_voice": self.use_voice.get(),
             "voice_engine": self.voice_engine.get(),
             "vosk_model_path": self.vosk_model_path.get(),
+            "voice_tuning": self._voice_tuning_config(),
             "auto_detect": self.auto_detect.get(),
             "auto_restart_on_rescan": self.auto_restart_on_rescan.get(),
             "auto_restart_on_race": self.auto_restart_on_race.get(),
@@ -3761,6 +4016,9 @@ class iRacingControlApp:
         self.use_voice.set(data.get("use_voice", False))
         self.voice_engine.set(data.get("voice_engine", "speech"))
         self.vosk_model_path.set(data.get("vosk_model_path", ""))
+        self._set_voice_tuning_vars(
+            data.get("voice_tuning", VOICE_TUNING_DEFAULTS)
+        )
         self.auto_detect.set(data.get("auto_detect", True))
         self.auto_restart_on_rescan.set(data.get("auto_restart_on_rescan", True))
         self.auto_restart_on_race.set(data.get("auto_restart_on_race", True))
@@ -3773,6 +4031,36 @@ class iRacingControlApp:
         self.active_vars = data.get("active_vars", [])
         self.current_car = data.get("current_car", "")
         self.current_track = data.get("current_track", "")
+
+    def _set_voice_tuning_vars(self, tuning: Dict[str, Any]):
+        """Populate Tk variables with stored voice tuning values."""
+
+        self.voice_ambient_duration.set(
+            tuning.get("ambient_duration", VOICE_TUNING_DEFAULTS["ambient_duration"])
+        )
+        self.voice_initial_timeout.set(
+            tuning.get("initial_timeout", VOICE_TUNING_DEFAULTS["initial_timeout"])
+        )
+        self.voice_continuous_timeout.set(
+            tuning.get(
+                "continuous_timeout",
+                VOICE_TUNING_DEFAULTS["continuous_timeout"]
+            )
+        )
+        self.voice_phrase_time_limit.set(
+            tuning.get(
+                "phrase_time_limit",
+                VOICE_TUNING_DEFAULTS["phrase_time_limit"]
+            )
+        )
+
+        energy_threshold = tuning.get("energy_threshold")
+        self.voice_energy_threshold.set(
+            "" if energy_threshold in {None, ""} else str(energy_threshold)
+        )
+        self.voice_dynamic_energy.set(
+            tuning.get("dynamic_energy", VOICE_TUNING_DEFAULTS["dynamic_energy"])
+        )
 
     # ------------------------------------------------------------------
     # Voice helpers
@@ -3893,6 +4181,7 @@ class iRacingControlApp:
 
     def _update_voice_controls(self):
         """Refresh UI state and listener config for voice engine selection."""
+        voice_listener.update_tuning(self._voice_tuning_config())
         engine = self.voice_engine.get()
         if engine == "vosk" and not HAS_VOSK:
             engine = "speech"
@@ -3991,6 +4280,7 @@ class iRacingControlApp:
         if self.app_state != "RUNNING":
             voice_listener.set_enabled(False)
         elif self.use_voice.get():
+            voice_listener.update_tuning(self._voice_tuning_config())
             voice_listener.set_engine(
                 self.voice_engine.get(),
                 self.vosk_model_path.get()

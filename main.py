@@ -3124,7 +3124,7 @@ class iRacingControlApp:
 
         tk.Button(
             settings_frame,
-            text="Opções de Voz/Áudio",
+            text="Voice/Audio Options",
             command=self.open_voice_audio_settings
         ).pack(side="right")
 
@@ -3236,7 +3236,7 @@ class iRacingControlApp:
     # Options UI
     # ------------------------------------------------------------------
     def _list_microphones(self) -> List[Tuple[int, str]]:
-        devices: List[Tuple[int, str]] = [(-1, "Padrão do sistema")]
+        devices: List[Tuple[int, str]] = [(-1, "System default")]
         if not HAS_SPEECH:
             return devices
 
@@ -3250,7 +3250,7 @@ class iRacingControlApp:
         return devices
 
     def _list_output_devices(self) -> List[Tuple[int, str]]:
-        devices: List[Tuple[int, str]] = [(-1, "Padrão do sistema")]
+        devices: List[Tuple[int, str]] = [(-1, "System default")]
         if not HAS_PYAUDIO:
             return devices
 
@@ -3301,7 +3301,7 @@ class iRacingControlApp:
             self.mic_combo["values"] = mic_labels
             current_label = self._device_label(
                 self.microphone_device.get() if self.microphone_device.get() in [i for i, _ in mic_devices] else -1,
-                dict(mic_devices).get(self.microphone_device.get(), "Padrão do sistema")
+                dict(mic_devices).get(self.microphone_device.get(), "System default")
             )
             self.mic_combo.set(current_label)
 
@@ -3313,7 +3313,7 @@ class iRacingControlApp:
             self.audio_output_combo["values"] = output_labels
             current_output_label = self._device_label(
                 self.audio_output_device.get() if self.audio_output_device.get() in [i for i, _ in output_devices] else -1,
-                dict(output_devices).get(self.audio_output_device.get(), "Padrão do sistema")
+                dict(output_devices).get(self.audio_output_device.get(), "System default")
             )
             self.audio_output_combo.set(current_output_label)
 
@@ -3332,12 +3332,12 @@ class iRacingControlApp:
     def open_voice_audio_settings(self):
         """Open the options window focused on voice and audio settings."""
 
-        if hasattr(self, "voice_window") and self.voice_window.winfo_exists():
+        if getattr(self, "voice_window", None) is not None and self.voice_window.winfo_exists():
             self.voice_window.lift()
             return
 
         self.voice_window = tk.Toplevel(self.root)
-        self.voice_window.title("Opções de Voz e Áudio")
+        self.voice_window.title("Voice and Audio Options")
         self.voice_window.geometry("720x520")
 
         def _cleanup():
@@ -3355,7 +3355,7 @@ class iRacingControlApp:
         notebook.pack(fill="both", expand=True, padx=10, pady=10)
 
         voice_tab = ttk.Frame(notebook)
-        notebook.add(voice_tab, text="Voz/Áudio")
+        notebook.add(voice_tab, text="Voice/Audio")
         self._build_voice_audio_tab(voice_tab)
 
         notebook.select(voice_tab)
@@ -3384,7 +3384,7 @@ class iRacingControlApp:
 
         tk.Button(
             toggles_frame,
-            text="Testar Voz",
+            text="Test Voice",
             command=self.open_voice_test_dialog,
             state=("normal" if HAS_SPEECH else "disabled")
         ).pack(side="left", padx=4)
@@ -3397,7 +3397,7 @@ class iRacingControlApp:
                 font=("Arial", 8)
             ).pack(side="left", padx=4)
 
-        engine_frame = tk.LabelFrame(parent, text="Motor de Reconhecimento")
+        engine_frame = tk.LabelFrame(parent, text="Recognition Engine")
         engine_frame.pack(fill="x", padx=2, pady=6)
 
         ttk.Label(engine_frame, text="Voice Engine:").pack(side="left", padx=4)
@@ -3432,13 +3432,13 @@ class iRacingControlApp:
             fg="gray"
         ).pack(side="left", padx=6)
 
-        device_frame = tk.LabelFrame(parent, text="Dispositivos de Entrada/Saída")
+        device_frame = tk.LabelFrame(parent, text="Input/Output Devices")
         device_frame.pack(fill="x", padx=2, pady=6)
 
         mic_row = tk.Frame(device_frame)
         mic_row.pack(fill="x", padx=6, pady=2)
 
-        ttk.Label(mic_row, text="Microfone:").pack(side="left")
+        ttk.Label(mic_row, text="Microphone:").pack(side="left")
         self.mic_combo = ttk.Combobox(mic_row, state="readonly", width=50)
         self.mic_combo.pack(side="left", padx=4, fill="x", expand=True)
         self.mic_combo.bind("<<ComboboxSelected>>", self._on_microphone_selected)
@@ -3446,27 +3446,27 @@ class iRacingControlApp:
         out_row = tk.Frame(device_frame)
         out_row.pack(fill="x", padx=6, pady=2)
 
-        ttk.Label(out_row, text="Saída de Áudio (TTS):").pack(side="left")
+        ttk.Label(out_row, text="Audio Output (TTS):").pack(side="left")
         self.audio_output_combo = ttk.Combobox(out_row, state="readonly", width=50)
         self.audio_output_combo.pack(side="left", padx=4, fill="x", expand=True)
         self.audio_output_combo.bind("<<ComboboxSelected>>", self._on_output_selected)
 
         tk.Button(
             device_frame,
-            text="Atualizar dispositivos",
+            text="Refresh devices",
             command=self._refresh_audio_device_lists
         ).pack(anchor="e", padx=6, pady=4)
 
         tuning_frame = tk.LabelFrame(
             parent,
-            text="Ajustes de Voz (precisão e velocidade)"
+            text="Voice Tuning (accuracy and speed)"
         )
         tuning_frame.pack(fill="x", padx=2, pady=(6, 4))
 
         tuning_row_1 = tk.Frame(tuning_frame)
         tuning_row_1.pack(fill="x", padx=6, pady=2)
 
-        ttk.Label(tuning_row_1, text="Ruído ambiente (s):").pack(side="left")
+        ttk.Label(tuning_row_1, text="Ambient noise (s):").pack(side="left")
         ttk.Spinbox(
             tuning_row_1,
             from_=0.0,
@@ -3476,7 +3476,7 @@ class iRacingControlApp:
             textvariable=self.voice_ambient_duration
         ).pack(side="left", padx=4)
 
-        ttk.Label(tuning_row_1, text="Duração máx. da frase (s):").pack(side="left")
+        ttk.Label(tuning_row_1, text="Max phrase duration (s):").pack(side="left")
         ttk.Spinbox(
             tuning_row_1,
             from_=0.2,
@@ -3488,14 +3488,14 @@ class iRacingControlApp:
 
         tk.Checkbutton(
             tuning_row_1,
-            text="Energia dinâmica (auto)",
+            text="Dynamic energy (auto)",
             variable=self.voice_dynamic_energy
         ).pack(side="left", padx=8)
 
         tuning_row_2 = tk.Frame(tuning_frame)
         tuning_row_2.pack(fill="x", padx=6, pady=2)
 
-        ttk.Label(tuning_row_2, text="Timeout inicial (s):").pack(side="left")
+        ttk.Label(tuning_row_2, text="Initial timeout (s):").pack(side="left")
         ttk.Spinbox(
             tuning_row_2,
             from_=0.0,
@@ -3505,7 +3505,7 @@ class iRacingControlApp:
             textvariable=self.voice_initial_timeout
         ).pack(side="left", padx=4)
 
-        ttk.Label(tuning_row_2, text="Timeout contínuo (s):").pack(side="left")
+        ttk.Label(tuning_row_2, text="Continuous timeout (s):").pack(side="left")
         ttk.Spinbox(
             tuning_row_2,
             from_=0.0,
@@ -3515,7 +3515,7 @@ class iRacingControlApp:
             textvariable=self.voice_continuous_timeout
         ).pack(side="left", padx=4)
 
-        ttk.Label(tuning_row_2, text="Energia mínima: ").pack(side="left")
+        ttk.Label(tuning_row_2, text="Minimum energy: ").pack(side="left")
         ttk.Entry(
             tuning_row_2,
             width=8,
@@ -3523,7 +3523,7 @@ class iRacingControlApp:
         ).pack(side="left", padx=4)
         tk.Label(
             tuning_row_2,
-            text="(vazio = automático)",
+            text="(blank = automatic)",
             fg="gray",
             font=("Arial", 8)
         ).pack(side="left", padx=2)

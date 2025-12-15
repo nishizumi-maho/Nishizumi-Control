@@ -155,6 +155,47 @@ CONFIG_FOLDER = os.path.join(BASE_PATH, APP_FOLDER, "configs")
 os.makedirs(CONFIG_FOLDER, exist_ok=True)
 CONFIG_FILE = os.path.join(CONFIG_FOLDER, "config_v3.json")
 PENDING_SCAN_FILE = os.path.join(CONFIG_FOLDER, "pending_scan.flag")
+ICON_CANDIDATES = ["DominantControl.ico", "DominantControl.png", "app.ico", "app.png"]
+
+
+def resolve_resource_path(filename: str) -> Optional[str]:
+    """Return the first existing path for a bundled or local resource."""
+
+    possible_roots = [
+        getattr(sys, "_MEIPASS", None),
+        os.path.dirname(sys.argv[0]),
+        os.path.abspath(os.path.dirname(__file__)),
+    ]
+
+    for root in possible_roots:
+        if not root:
+            continue
+        candidate = os.path.join(root, filename)
+        if os.path.exists(candidate):
+            return candidate
+
+    return None
+
+
+def apply_app_icon(root: tk.Tk) -> None:
+    """Set the window icon to the packaged icon when available."""
+
+    for icon_name in ICON_CANDIDATES:
+        icon_path = resolve_resource_path(icon_name)
+        if not icon_path:
+            continue
+
+        try:
+            if icon_path.lower().endswith(".ico"):
+                root.iconbitmap(icon_path)
+            else:
+                image = tk.PhotoImage(file=icon_path)
+                root.iconphoto(True, image)
+                root._icon_ref = image  # Prevent garbage collection
+            return
+        except Exception as exc:  # noqa: PERF203
+            print(f"[ICON] Failed to load {icon_path}: {exc}")
+
 
 # Overlay feedback defaults (per-car thresholds)
 DEFAULT_OVERLAY_FEEDBACK = {
@@ -1466,6 +1507,7 @@ class OverlayWindow(tk.Toplevel):
         self.wm_attributes("-topmost", True)
         self.wm_attributes("-alpha", 0.85)
         self.geometry("250x150+50+50")
+        apply_app_icon(self)
 
         self.style_cfg = {
             "bg": "black",
@@ -1785,6 +1827,13 @@ class OverlayConfigTab(tk.Frame):
         )
         feedback_frame.pack(fill="x", padx=5, pady=5)
 
+        tk.Checkbutton(
+            feedback_frame,
+            text="Show ABS / TC / slip hints on the HUD",
+            variable=self.app.show_overlay_feedback,
+            command=self._on_feedback_toggle,
+        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=5, pady=(4, 6))
+
         self.feedback_vars = {
             "abs_hold_s": tk.DoubleVar(value=DEFAULT_OVERLAY_FEEDBACK["abs_hold_s"]),
             "tc_hold_s": tk.DoubleVar(value=DEFAULT_OVERLAY_FEEDBACK["tc_hold_s"]),
@@ -1798,6 +1847,7 @@ class OverlayConfigTab(tk.Frame):
             "lockup_hold_s": tk.DoubleVar(value=DEFAULT_OVERLAY_FEEDBACK["lockup_hold_s"]),
             "cooldown_s": tk.DoubleVar(value=DEFAULT_OVERLAY_FEEDBACK["cooldown_s"]),
         }
+        self.feedback_entries: Dict[str, tk.Entry] = {}
 
         feedback_rows = [
             ("ABS active longer than (s)", "abs_hold_s"),
@@ -1809,7 +1859,7 @@ class OverlayConfigTab(tk.Frame):
             ("Cooldown between alerts (s)", "cooldown_s"),
         ]
 
-        for idx, (label, key) in enumerate(feedback_rows):
+        for idx, (label, key) in enumerate(feedback_rows, start=1):
             tk.Label(feedback_frame, text=label).grid(
                 row=idx, column=0, padx=5, pady=2, sticky="w"
             )
@@ -1817,6 +1867,9 @@ class OverlayConfigTab(tk.Frame):
             entry.grid(row=idx, column=1, padx=5, pady=2, sticky="w")
             entry.bind("<FocusOut>", self._on_feedback_change)
             entry.bind("<KeyRelease>", self._on_feedback_change)
+            self.feedback_entries[key] = entry
+
+        self._set_feedback_fields_enabled(self.app.show_overlay_feedback.get())
 
         tk.Button(
             appearance_frame,
@@ -1956,6 +2009,22 @@ class OverlayConfigTab(tk.Frame):
         self._collect_feedback_for_car(car)
         self.app.schedule_save()
 
+    def _on_feedback_toggle(self):
+        """Enable or disable assist hints and persist the preference."""
+
+        self._set_feedback_fields_enabled(self.app.show_overlay_feedback.get())
+        self._on_feedback_change()
+
+    def _set_feedback_fields_enabled(self, enabled: bool) -> None:
+        """Toggle entry state for assist thresholds."""
+
+        state = "normal" if enabled else "disabled"
+        for entry in self.feedback_entries.values():
+            try:
+                entry.config(state=state)
+            except Exception:
+                continue
+
     def _on_overlay_row_change(self, var_name: str):
         """Apply live updates when overlay rows change."""
         car = self.app.current_car or "Generic Car"
@@ -2004,6 +2073,8 @@ class OverlayConfigTab(tk.Frame):
                 var.set(float(cfg.get(key, DEFAULT_OVERLAY_FEEDBACK[key])))
             except Exception:
                 var.set(DEFAULT_OVERLAY_FEEDBACK[key])
+
+        self._set_feedback_fields_enabled(self.app.show_overlay_feedback.get())
 
     def _collect_feedback_for_car(self, car_name: str) -> Dict[str, float]:
         """Persist feedback thresholds from UI fields for a car."""
@@ -2361,23 +2432,51 @@ class ControlTab(tk.Frame):
 
         tk.Label(
             presets_frame,
-            text="RESET always returns to a base value (e.g., 0 or 50).",
+            text="RESET always returns to a base value (e.g., 0 or 50). Add your go-to macro values below.",
             fg="gray",
-            font=("Arial", 8)
+            font=("Arial", 8),
+            wraplength=760,
+            justify="left"
         ).pack(anchor="w", pady=(0, 5))
 
         tk.Label(
             presets_frame,
             text=(
-                "Voice column: type the exact phrase you will say to trigger or"
-                " speak this macro. Voice/Audio Settings live under Options"
-                " → Voice/Audio Settings."
+                "Optional voice trigger: type the exact phrase you will say to run the macro. "
+                "Voice/Audio Settings live under Options → Voice/Audio Settings."
             ),
             fg="gray",
             font=("Arial", 8),
             wraplength=760,
             justify="left"
         ).pack(anchor="w", padx=2, pady=(0, 5))
+
+        header = tk.Frame(presets_frame)
+        header.pack(fill="x", padx=2, pady=(0, 2))
+        tk.Label(
+            header, text="Type", width=6, anchor="w", font=("Arial", 8, "bold")
+        ).pack(side="left")
+        tk.Label(
+            header,
+            text="Macro value",
+            width=10,
+            anchor="w",
+            font=("Arial", 8, "bold")
+        ).pack(side="left", padx=5)
+        tk.Label(
+            header,
+            text="Keybinding",
+            width=12,
+            anchor="w",
+            font=("Arial", 8, "bold")
+        ).pack(side="left", padx=5)
+        tk.Label(
+            header,
+            text="Voice trigger phrase",
+            width=20,
+            anchor="w",
+            font=("Arial", 8, "bold")
+        ).pack(side="left", padx=5)
 
         self.presets_container = tk.Frame(presets_frame)
         self.presets_container.pack(fill="both", expand=True)
@@ -2707,11 +2806,18 @@ class ComboTab(tk.Frame):
             ).pack(side="left", padx=2)
 
         tk.Label(
+            header,
+            text="Voice trigger phrase",
+            width=18,
+            anchor="w",
+            font=("Arial", 8, "bold")
+        ).pack(side="left", padx=4)
+
+        tk.Label(
             body,
             text=(
-                "Voice column: type the exact phrase you will say to trigger"
-                " this combo. Voice/Audio Settings live under Options"
-                " → Voice/Audio Settings."
+                "Optional voice trigger: type the exact phrase you will say to fire this combo. "
+                "Voice/Audio Settings live under Options → Voice/Audio Settings."
             ),
             fg="gray",
             font=("Arial", 8),
@@ -3130,6 +3236,7 @@ class iRacingControlApp:
         self.root = root
         self.root.title(f"{APP_NAME} v{APP_VERSION}")
         self.root.geometry("820x900")
+        apply_app_icon(self.root)
 
         # Thread-safe UI queue
         self._uiq: "queue.Queue[Tuple[Callable, tuple, dict]]" = queue.Queue()
@@ -3153,6 +3260,7 @@ class iRacingControlApp:
         # Overlay config per car
         self.car_overlay_config: Dict[str, Dict[str, Dict[str, Any]]] = {}
         self.car_overlay_feedback: Dict[str, Dict[str, float]] = {}
+        self.show_overlay_feedback = tk.BooleanVar(value=True)
 
         self._overlay_feedback_state = {
             "last_time": time.time(),
@@ -4514,7 +4622,10 @@ class iRacingControlApp:
 
             self.overlay.update_monitor_values(data)
 
-        self._update_overlay_feedback()
+        if self.show_overlay_feedback.get():
+            self._update_overlay_feedback()
+        else:
+            self._overlay_feedback_state["last_time"] = time.time()
 
         self.root.after(100, self.update_overlay_loop)
 
@@ -4706,6 +4817,7 @@ class iRacingControlApp:
         data = {
             "global_timing": GLOBAL_TIMING,
             "hud_style": self.overlay.style_cfg,
+            "show_overlay_feedback": self.show_overlay_feedback.get(),
             "use_keyboard_only": self.use_keyboard_only.get(),
             "use_tts": self.use_tts.get(),
             "use_voice": self.use_voice.get(),
@@ -4751,6 +4863,8 @@ class iRacingControlApp:
         if style:
             self.overlay.style_cfg.update(style)
             self.overlay.apply_style(self.overlay.style_cfg)
+
+        self.show_overlay_feedback.set(data.get("show_overlay_feedback", True))
 
         self.use_keyboard_only.set(data.get("use_keyboard_only", False))
         self.use_tts.set(data.get("use_tts", False))

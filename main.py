@@ -29,6 +29,7 @@ import irsdk
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from dominant_control import audio_settings
 from dominant_control.config import (
     APP_FOLDER,
     APP_NAME,
@@ -51,14 +52,9 @@ from dominant_control.controllers import GenericController
 from dominant_control.controllers.device_allowlist import DeviceAllowlistManager
 from dominant_control.controllers.lifecycle import LifecycleManager
 from dominant_control.dependencies import (
-    HAS_PYAUDIO,
     HAS_PYGAME,
-    HAS_SPEECH,
-    HAS_TTS,
     HAS_VOSK,
-    pyaudio,
     pygame,
-    sr,
     vosk,
 )
 from dominant_control.input_engine import (
@@ -74,6 +70,7 @@ from dominant_control.ui.overlay_config import OverlayConfigTab, ScrollableFrame
 from dominant_control.ui.overlay_feedback import OverlayFeedbackManager
 from dominant_control.ui.overlay_window import OverlayWindow
 from dominant_control.ui.timing_window import GlobalTimingWindow
+from dominant_control.ui.voice_audio import build_voice_audio_window
 from dominant_control.voice import VoiceTestDialog, voice_listener
 from dominant_control.voice_control import VoiceControlManager
 
@@ -458,102 +455,10 @@ class iRacingControlApp:
     # ------------------------------------------------------------------
     # Options UI
     # ------------------------------------------------------------------
-    def _list_microphones(self) -> List[Tuple[int, str]]:
-        devices: List[Tuple[int, str]] = [(-1, "System default")]
-        if not HAS_SPEECH:
-            return devices
-
-        try:
-            mic_names = sr.Microphone.list_microphone_names() or []
-            for idx, name in enumerate(mic_names):
-                devices.append((idx, name))
-        except Exception as exc:  # noqa: PERF203
-            print(f"[Voice] Unable to list microphones: {exc}")
-
-        return devices
-
-    def _list_output_devices(self) -> List[Tuple[int, str]]:
-        devices: List[Tuple[int, str]] = [(-1, "System default")]
-        if not HAS_PYAUDIO:
-            return devices
-
-        try:
-            pa = pyaudio.PyAudio()
-            try:
-                for idx in range(pa.get_device_count()):
-                    info = pa.get_device_info_by_index(idx)
-                    if info.get("maxOutputChannels", 0) > 0:
-                        name = info.get("name", f"Output {idx}")
-                        devices.append((idx, name))
-            finally:
-                pa.terminate()
-        except Exception as exc:  # noqa: PERF203
-            print(f"[Audio] Unable to list output devices: {exc}")
-
-        return devices
-
-    @staticmethod
-    def _device_label(idx: int, name: str) -> str:
-        return f"[{idx}] {name}"
-
-    @staticmethod
-    def _parse_device_index(label: str) -> int:
-        try:
-            start = label.find("[")
-            end = label.find("]")
-            return int(label[start + 1:end]) if start >= 0 and end > start else -1
-        except Exception:
-            return -1
-
-    def _apply_audio_preferences(self):
-        """Send selected devices to voice listener and TTS engine."""
-
-        mic_index = self.microphone_device.get()
-        voice_listener.set_device_index(mic_index if mic_index >= 0 else None)
-
-        output_index = self.audio_output_device.get()
-        global TTS_OUTPUT_DEVICE_INDEX
-        TTS_OUTPUT_DEVICE_INDEX = output_index if output_index >= 0 else None
-
     def apply_audio_preferences(self):
-        self._apply_audio_preferences()
-
-    def _refresh_audio_device_lists(self):
-        mic_devices = self._list_microphones()
-        if self.microphone_device.get() not in [i for i, _ in mic_devices]:
-            self.microphone_device.set(-1)
-        mic_labels = [self._device_label(idx, name) for idx, name in mic_devices]
-        if self.mic_combo:
-            self.mic_combo["values"] = mic_labels
-            current_label = self._device_label(
-                self.microphone_device.get() if self.microphone_device.get() in [i for i, _ in mic_devices] else -1,
-                dict(mic_devices).get(self.microphone_device.get(), "System default")
-            )
-            self.mic_combo.set(current_label)
-
-        output_devices = self._list_output_devices()
-        if self.audio_output_device.get() not in [i for i, _ in output_devices]:
-            self.audio_output_device.set(-1)
-        output_labels = [self._device_label(idx, name) for idx, name in output_devices]
-        if self.audio_output_combo:
-            self.audio_output_combo["values"] = output_labels
-            current_output_label = self._device_label(
-                self.audio_output_device.get() if self.audio_output_device.get() in [i for i, _ in output_devices] else -1,
-                dict(output_devices).get(self.audio_output_device.get(), "System default")
-            )
-            self.audio_output_combo.set(current_output_label)
-
-    def _on_microphone_selected(self, *_):
-        selection = self._parse_device_index(self.mic_combo.get()) if self.mic_combo else -1
-        self.microphone_device.set(selection)
-        self._apply_audio_preferences()
-        self.schedule_save()
-
-    def _on_output_selected(self, *_):
-        selection = self._parse_device_index(self.audio_output_combo.get()) if self.audio_output_combo else -1
-        self.audio_output_device.set(selection)
-        self._apply_audio_preferences()
-        self.schedule_save()
+        audio_settings.apply_audio_preferences(
+            self.microphone_device.get(), self.audio_output_device.get()
+        )
 
     def open_voice_audio_settings(self):
         """Open the options window focused on voice and audio settings."""
@@ -562,213 +467,7 @@ class iRacingControlApp:
             self.voice_window.lift()
             return
 
-        self.voice_window = tk.Toplevel(self.root)
-        self.voice_window.title("Voice and Audio Options")
-        self.voice_window.geometry("720x520")
-
-        def _cleanup():
-            if self.voice_window and self.voice_window.winfo_exists():
-                self.voice_window.destroy()
-            self.voice_window = None
-            self.voice_engine_combo = None
-            self.btn_vosk_model = None
-            self.mic_combo = None
-            self.audio_output_combo = None
-
-        self.voice_window.protocol("WM_DELETE_WINDOW", _cleanup)
-
-        notebook = ttk.Notebook(self.voice_window)
-        notebook.pack(fill="both", expand=True, padx=10, pady=10)
-
-        voice_tab = ttk.Frame(notebook)
-        notebook.add(voice_tab, text="Voice/Audio")
-        self._build_voice_audio_tab(voice_tab)
-
-        notebook.select(voice_tab)
-
-    def _build_voice_audio_tab(self, parent: tk.Widget):
-        """Construct the tab containing voice and audio controls."""
-
-        toggles_frame = tk.Frame(parent)
-        toggles_frame.pack(fill="x", pady=4)
-
-        if HAS_TTS:
-            tk.Checkbutton(
-                toggles_frame,
-                text="Voice (TTS)",
-                variable=self.use_tts,
-                command=self.schedule_save
-            ).pack(side="left", padx=4)
-
-        tk.Checkbutton(
-            toggles_frame,
-            text="Voice Triggers",
-            variable=self.use_voice,
-            state=("normal" if HAS_SPEECH else "disabled"),
-            command=self.on_voice_toggle
-        ).pack(side="left", padx=4)
-
-        tk.Button(
-            toggles_frame,
-            text="Test Voice",
-            command=self.open_voice_test_dialog,
-            state=("normal" if HAS_SPEECH else "disabled")
-        ).pack(side="left", padx=4)
-
-        if not HAS_SPEECH:
-            tk.Label(
-                toggles_frame,
-                text="(Install 'speech_recognition' for voice)",
-                fg="gray",
-                font=("Arial", 8)
-            ).pack(side="left", padx=4)
-
-        engine_frame = tk.LabelFrame(parent, text="Recognition Engine")
-        engine_frame.pack(fill="x", padx=2, pady=6)
-
-        ttk.Label(engine_frame, text="Voice Engine:").pack(side="left", padx=4)
-        engine_options = ["speech"] + (["vosk"] if HAS_VOSK else [])
-        self.voice_engine_combo = ttk.Combobox(
-            engine_frame,
-            values=engine_options,
-            state="readonly",
-            width=12
-        )
-        default_engine = self.voice_engine.get()
-        if default_engine not in engine_options:
-            default_engine = "speech"
-            self.voice_engine.set(default_engine)
-        self.voice_engine_combo.set(default_engine)
-        self.voice_engine_combo.bind(
-            "<<ComboboxSelected>>",
-            lambda _evt: self.on_voice_engine_changed()
-        )
-        self.voice_engine_combo.pack(side="left", padx=4)
-
-        self.btn_vosk_model = tk.Button(
-            engine_frame,
-            text="Select Vosk Model...",
-            command=self.choose_vosk_model
-        )
-        self.btn_vosk_model.pack(side="left", padx=4)
-
-        tk.Label(
-            engine_frame,
-            textvariable=self.vosk_status_var,
-            fg="gray"
-        ).pack(side="left", padx=6)
-
-        device_frame = tk.LabelFrame(parent, text="Input/Output Devices")
-        device_frame.pack(fill="x", padx=2, pady=6)
-
-        mic_row = tk.Frame(device_frame)
-        mic_row.pack(fill="x", padx=6, pady=2)
-
-        ttk.Label(mic_row, text="Microphone:").pack(side="left")
-        self.mic_combo = ttk.Combobox(mic_row, state="readonly", width=50)
-        self.mic_combo.pack(side="left", padx=4, fill="x", expand=True)
-        self.mic_combo.bind("<<ComboboxSelected>>", self._on_microphone_selected)
-
-        out_row = tk.Frame(device_frame)
-        out_row.pack(fill="x", padx=6, pady=2)
-
-        ttk.Label(out_row, text="Audio Output (TTS):").pack(side="left")
-        self.audio_output_combo = ttk.Combobox(out_row, state="readonly", width=50)
-        self.audio_output_combo.pack(side="left", padx=4, fill="x", expand=True)
-        self.audio_output_combo.bind("<<ComboboxSelected>>", self._on_output_selected)
-
-        tk.Button(
-            device_frame,
-            text="Refresh devices",
-            command=self._refresh_audio_device_lists
-        ).pack(anchor="e", padx=6, pady=4)
-
-        tuning_frame = tk.LabelFrame(
-            parent,
-            text="Voice Tuning (accuracy and speed)"
-        )
-        tuning_frame.pack(fill="x", padx=2, pady=(6, 4))
-
-        tuning_row_1 = tk.Frame(tuning_frame)
-        tuning_row_1.pack(fill="x", padx=6, pady=2)
-
-        ttk.Label(tuning_row_1, text="Ambient noise (s):").pack(side="left")
-        ttk.Spinbox(
-            tuning_row_1,
-            from_=0.0,
-            to=3.0,
-            increment=0.1,
-            width=6,
-            textvariable=self.voice_ambient_duration
-        ).pack(side="left", padx=4)
-
-        ttk.Label(tuning_row_1, text="Max phrase duration (s):").pack(side="left")
-        ttk.Spinbox(
-            tuning_row_1,
-            from_=0.2,
-            to=6.0,
-            increment=0.1,
-            width=6,
-            textvariable=self.voice_phrase_time_limit
-        ).pack(side="left", padx=4)
-
-        tk.Checkbutton(
-            tuning_row_1,
-            text="Dynamic energy (auto)",
-            variable=self.voice_dynamic_energy
-        ).pack(side="left", padx=8)
-
-        tuning_row_2 = tk.Frame(tuning_frame)
-        tuning_row_2.pack(fill="x", padx=6, pady=2)
-
-        ttk.Label(tuning_row_2, text="Initial timeout (s):").pack(side="left")
-        ttk.Spinbox(
-            tuning_row_2,
-            from_=0.0,
-            to=5.0,
-            increment=0.1,
-            width=6,
-            textvariable=self.voice_initial_timeout
-        ).pack(side="left", padx=4)
-
-        ttk.Label(tuning_row_2, text="Continuous timeout (s):").pack(side="left")
-        ttk.Spinbox(
-            tuning_row_2,
-            from_=0.0,
-            to=5.0,
-            increment=0.1,
-            width=6,
-            textvariable=self.voice_continuous_timeout
-        ).pack(side="left", padx=4)
-
-        ttk.Label(tuning_row_2, text="Minimum energy: ").pack(side="left")
-        ttk.Entry(
-            tuning_row_2,
-            width=8,
-            textvariable=self.voice_energy_threshold
-        ).pack(side="left", padx=4)
-        tk.Label(
-            tuning_row_2,
-            text="(blank = automatic)",
-            fg="gray",
-            font=("Arial", 8)
-        ).pack(side="left", padx=2)
-
-        if not self._voice_traces_attached:
-            for var in (
-                self.voice_ambient_duration,
-                self.voice_phrase_time_limit,
-                self.voice_initial_timeout,
-                self.voice_continuous_timeout,
-                self.voice_energy_threshold,
-                self.voice_dynamic_energy
-            ):
-                var.trace_add("write", self.on_voice_tuning_changed)
-
-            self._voice_traces_attached = True
-
-        self._refresh_audio_device_lists()
-        self._update_voice_controls()
+        build_voice_audio_window(self)
 
     def toggle_mode(self):
         """Toggle between RUNNING and CONFIG modes."""

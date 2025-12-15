@@ -1,22 +1,18 @@
-"""Control tab UI for configuring individual control variables."""
-
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
-
 import threading
+from typing import Any, Dict, List, Optional
+
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+from dominant_control.controllers import GenericController
 from dominant_control.input_manager import input_manager
-from dominant_control.ui.overlay_config import ScrollableFrame
-
-if TYPE_CHECKING:  # pragma: no cover - for type hints only
-    from main import GenericController  # noqa: F401
+from .widgets import ScrollableFrame
 
 
 class ControlTab(tk.Frame):
     """Configuration tab for a single control variable."""
 
-    def __init__(self, parent, controller: "GenericController", label_name: str, app):
+    def __init__(self, parent, controller: GenericController, label_name: str, app):
         super().__init__(parent)
         self.app = app
         self.controller = controller
@@ -189,8 +185,7 @@ class ControlTab(tk.Frame):
                 pass
 
     def bind_game_key(self, direction: str):
-        """
-        Bind a game key for increase/decrease.
+        """Bind a game key for increase/decrease.
 
         Args:
             direction: "increase" or "decrease"
@@ -227,6 +222,7 @@ class ControlTab(tk.Frame):
 
     def _config_bind_button(self, button: tk.Button, data_store: Dict[str, Any]):
         """Configure binding button behavior."""
+
         def on_click():
             if self.app.app_state != "CONFIG":
                 messagebox.showinfo("Notice", "Enter CONFIG mode first.")
@@ -398,6 +394,3 @@ class ControlTab(tk.Frame):
 
         while sum(1 for p in self.preset_rows if not p["is_reset"]) < 4:
             self.add_preset_row()
-
-
-__all__ = ["ControlTab"]

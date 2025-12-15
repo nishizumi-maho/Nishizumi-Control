@@ -1,26 +1,20 @@
-"""Combo tab UI for creating multi-variable macros."""
-
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List
 
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+from dominant_control.controllers import GenericController
 from dominant_control.input_manager import input_manager
-from dominant_control.ui.overlay_config import ScrollableFrame
-
-if TYPE_CHECKING:  # pragma: no cover - for type hints only
-    from main import GenericController  # noqa: F401
+from .widgets import ScrollableFrame
 
 
 class ComboTab(tk.Frame):
-    """
-    Tab for creating combo macros that adjust multiple variables with one trigger.
-    """
+    """Tab for creating combo macros that adjust multiple variables with one trigger."""
 
     def __init__(
         self,
         parent,
-        controllers_dict: Dict[str, "GenericController"],
+        controllers_dict: Dict[str, GenericController],
         app
     ):
         super().__init__(parent)
@@ -114,6 +108,7 @@ class ComboTab(tk.Frame):
 
     def _config_bind_button(self, button: tk.Button, data_store: Dict[str, Any]):
         """Configure binding button behavior."""
+
         def on_click():
             if self.app.app_state != "CONFIG":
                 messagebox.showinfo("Notice", "Enter CONFIG mode first.")
@@ -265,6 +260,3 @@ class ComboTab(tk.Frame):
 
         if len(self.preset_rows) < 2:
             self.add_dynamic_row()
-
-
-__all__ = ["ComboTab"]

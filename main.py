@@ -47,7 +47,7 @@ from dominant_control.config import (
     resolve_resource_path,
     restart_program,
 )
-from dominant_control.controller import GenericController
+from dominant_control.controllers import GenericController
 from dominant_control.dependencies import (
     HAS_PYAUDIO,
     HAS_PYGAME,
@@ -63,6 +63,7 @@ from dominant_control.input_engine import (
     IS_WINDOWS,
     _normalize_timing_config,
 )
+from dominant_control.ui import ComboTab, ControlTab, ScrollableFrame
 from dominant_control.input_manager import input_manager
 from dominant_control.tts import speak_text
 from dominant_control.ui.combo_tab import ComboTab
@@ -76,44 +77,273 @@ from dominant_control.voice import VoiceTestDialog, voice_listener
 
 
 # ======================================================================
-# SCROLLABLE FRAME WIDGET
+# DEVICE SELECTOR DIALOG
 # ======================================================================
-class ScrollableFrame(tk.Frame):
+class DeviceSelector(tk.Toplevel):
     """
-    Frame with vertical scrollbar.
-    Use self.inner as the container for child widgets.
+    Dialog for selecting which USB devices the application can use.
     """
 
-    def __init__(self, parent, *args, **kwargs):
-        super().__init__(parent, *args, **kwargs)
+    def __init__(self, parent, current_allowed: List[str], callback: Callable[[List[str]], None]):
+        super().__init__(parent)
+        self.title("Manage USB Devices")
+        self.geometry("450x400")
+        self.callback = callback
 
-        canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0)
-        scrollbar = tk.Scrollbar(self, orient="vertical", command=canvas.yview)
-        self.inner = tk.Frame(canvas)
+        tk.Label(
+            self,
+            text="Select which devices the application can use",
+            font=("Arial", 10, "bold"),
+            pady=10
+        ).pack()
 
-        self.inner.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        tk.Label(
+            self,
+            text="Check/uncheck to allow/disallow device usage",
+            fg="gray"
+        ).pack()
+
+        self.frame_list = tk.Frame(self)
+        self.frame_list.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.check_vars: Dict[str, tk.BooleanVar] = {}
+        all_devices = input_manager.get_all_devices()
+
+        for idx, name in all_devices:
+            var = tk.BooleanVar()
+            if current_allowed:
+                var.set(name in current_allowed)
+            else:
+                # First run defaults to nothing selected
+                var.set(False)
+
+            chk = tk.Checkbutton(
+                self.frame_list, 
+                text=name, 
+                variable=var, 
+                anchor="w"
+            )
+            chk.pack(fill="x")
+            self.check_vars[name] = var
+
+        tk.Button(
+            self,
+            text="Save and Apply",
+            command=self.save,
+            bg="#90ee90",
+            height=2
+        ).pack(fill="x", padx=10, pady=10)
+
+    def save(self):
+        """Save device selection and close dialog."""
+        final_list = [name for name, var in self.check_vars.items() if var.get()]
+        self.callback(final_list)
+        self.destroy()
+
+
+# ======================================================================
+# HUD OVERLAY WINDOW
+# ======================================================================
+class OverlayWindow(tk.Toplevel):
+    """
+    Draggable HUD overlay showing real-time telemetry values.
+    """
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.overrideredirect(True)
+        self.wm_attributes("-topmost", True)
+        self.wm_attributes("-alpha", 0.85)
+        self.geometry("250x150+50+50")
+        apply_app_icon(self)
+
+        self.style_cfg = {
+            "bg": "black",
+            "fg": "white",
+            "font_size": 10,
+            "opacity": 0.85
+        }
+
+        self.configure(bg=self.style_cfg["bg"])
+
+        # Status header
+        self.frame_status = tk.Frame(self, bg=self.style_cfg["bg"])
+        self.frame_status.pack(fill="x", pady=2)
+
+        self.lbl_status = tk.Label(
+            self.frame_status,
+            text="HUD Ready",
+            fg="#00FF00",
+            bg=self.style_cfg["bg"],
+            font=("Consolas", self.style_cfg["font_size"] + 1, "bold")
         )
+        self.lbl_status.pack(anchor="w", padx=5)
 
-        canvas.create_window((0, 0), window=self.inner, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
+        self.separator = tk.Frame(self, bg="#333", height=1)
+        self.separator.pack(fill="x", padx=2)
 
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        # Content area
+        self.frame_monitor = tk.Frame(self, bg=self.style_cfg["bg"])
+        self.frame_monitor.pack(fill="both", expand=True, padx=5, pady=2)
 
-        # Mouse wheel support (bind only while hovered)
-        def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        self.monitor_widgets: Dict[str, Tuple[tk.Label, tk.Label]] = {}
 
-        def _bind_mousewheel(_event):
-            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        # Drag support
+        self.x = 0
+        self.y = 0
+        self._bind_drag(self.frame_status)
+        self._bind_drag(self.lbl_status)
+        self._bind_drag(self.frame_monitor)
 
-        def _unbind_mousewheel(_event):
-            canvas.unbind_all("<MouseWheel>")
+    def _bind_drag(self, widget):
+        """Bind drag events to a widget."""
+        widget.bind("<Button-1>", self._start_move)
+        widget.bind("<B1-Motion>", self._do_move)
 
-        canvas.bind("<Enter>", _bind_mousewheel)
-        canvas.bind("<Leave>", _unbind_mousewheel)
+    def _start_move(self, event):
+        """Start dragging."""
+        self.x = event.x
+        self.y = event.y
+
+    def _do_move(self, event):
+        """Handle drag motion."""
+        dx = event.x - self.x
+        dy = event.y - self.y
+        x = self.winfo_x() + dx
+        y = self.winfo_y() + dy
+        self.geometry(f"+{x}+{y}")
+
+    def apply_style(self, style_dict: Dict[str, Any]):
+        """
+        Apply style configuration to the overlay.
+        
+        Args:
+            style_dict: Dictionary with bg, fg, font_size, opacity keys
+        """
+        self.style_cfg.update(style_dict)
+        bg = self.style_cfg["bg"]
+        fg = self.style_cfg["fg"]
+        fs = self.style_cfg["font_size"]
+        op = self.style_cfg["opacity"]
+
+        self.configure(bg=bg)
+        self.wm_attributes("-alpha", op)
+
+        self.frame_status.config(bg=bg)
+        self.lbl_status.config(bg=bg, font=("Consolas", fs + 1, "bold"))
+        self.frame_monitor.config(bg=bg)
+
+        # Update all monitor widgets
+        for row in self.frame_monitor.winfo_children():
+            row.config(bg=bg)
+            for child in row.winfo_children():
+                txt = child.cget("text")
+                is_value = (txt == "--" or (txt and (txt[0].isdigit() or txt[0] == "-")))
+                if is_value:
+                    child.config(bg=bg, fg=fg, font=("Consolas", fs, "bold"))
+                else:
+                    child.config(bg=bg, fg="#AAAAAA", font=("Consolas", fs))
+
+    def update_status_text(self, text: str, color: str = "white"):
+        """
+        Update the status header text.
+        
+        Args:
+            text: Status text to display
+            color: Color name or hex code
+        """
+        color_map = {
+            "red": "#FF4444",
+            "green": "#00FF00",
+            "orange": "#FFA500",
+            "white": self.style_cfg["fg"]
+        }
+        c = color_map.get(color, color)
+        try:
+            self.lbl_status.config(text=text, fg=c)
+        except Exception:
+            pass
+
+    def rebuild_monitor(self, var_configs: Dict[str, Dict[str, Any]]):
+        """
+        Rebuild the monitor display with new variables.
+        
+        Args:
+            var_configs: Dict of var_name -> {"show": bool, "label": str}
+        """
+        # Clear existing widgets
+        for widget in self.frame_monitor.winfo_children():
+            widget.destroy()
+        self.monitor_widgets.clear()
+
+        visible_vars = [v for v, cfg in var_configs.items() if cfg.get("show", False)]
+        if not visible_vars:
+            return
+
+        for var_name in visible_vars:
+            cfg = var_configs.get(var_name, {})
+            label_text = cfg.get("label") or var_name.replace("dc", "")
+
+            row = tk.Frame(self.frame_monitor, bg=self.style_cfg["bg"])
+            row.pack(fill="x")
+            self._bind_drag(row)
+
+            l_name = tk.Label(
+                row,
+                text=f"{label_text}:",
+                bg=self.style_cfg["bg"],
+                fg="#AAAAAA",
+                font=("Consolas", self.style_cfg["font_size"]),
+                width=15,
+                anchor="w"
+            )
+            l_name.pack(side="left")
+            self._bind_drag(l_name)
+
+            l_value = tk.Label(
+                row,
+                text="--",
+                bg=self.style_cfg["bg"],
+                fg=self.style_cfg["fg"],
+                font=("Consolas", self.style_cfg["font_size"], "bold")
+            )
+            l_value.pack(side="right")
+            self._bind_drag(l_value)
+
+            self.monitor_widgets[var_name] = (l_name, l_value)
+
+        # Resize window
+        line_height = self.style_cfg["font_size"] * 2 + 6
+        h = 45 + (len(visible_vars) * line_height)
+        h = max(60, min(h, 800))
+
+        geometry = self.geometry().split('+')
+        try:
+            self.geometry(f"250x{h}+{geometry[1]}+{geometry[2]}")
+        except Exception:
+            self.geometry(f"250x{h}+50+50")
+
+    def update_monitor_values(self, data_dict: Dict[str, Any]):
+        """
+        Update displayed telemetry values.
+        
+        Args:
+            data_dict: Dict of var_name -> value
+        """
+        for var_name, value in data_dict.items():
+            if var_name in self.monitor_widgets:
+                _name_label, value_label = self.monitor_widgets[var_name]
+                if value is None:
+                    text = "--"
+                elif isinstance(value, float):
+                    text = f"{value:.3f}"
+                else:
+                    text = str(value)
+                try:
+                    value_label.config(text=text)
+                except Exception:
+                    pass
+
 
 class OverlayConfigTab(tk.Frame):
     """
@@ -468,272 +698,6 @@ class OverlayConfigTab(tk.Frame):
         return cfg
 
 
-# ======================================================================
-# GENERIC CONTROLLER
-# ======================================================================
-class GenericController:
-    """
-    Controller for adjusting a single telemetry variable via key presses.
-    """
-
-    def __init__(
-        self,
-        ir_instance,
-        var_name: str,
-        is_float: bool = False,
-        status_callback: Optional[Callable[[str, str], None]] = None,
-        app_ref=None
-    ):
-        self.ir = ir_instance
-        self.var_name = var_name
-        self.is_float = is_float
-        self.running_action = False
-        self.key_increase = None
-        self.key_decrease = None
-        self.update_status = status_callback
-        self.app = app_ref
-
-    def read_telemetry(self) -> Optional[float]:
-        """
-        Read current value of the controlled variable.
-        
-        Returns:
-            Current value or None if unavailable
-        """
-        try:
-            if not getattr(self.ir, "is_initialized", False):
-                try:
-                    self.ir.startup()
-                except Exception:
-                    return None
-                    
-            value = self.ir[self.var_name]
-            if value is None:
-                return None
-                
-            if self.is_float:
-                return float(value)
-            else:
-                return int(round(value))
-        except Exception:
-            return None
-
-    def _detect_float_step(self) -> Optional[float]:
-        """Detect the minimal float increment by pulsing once and restoring."""
-        if not self.is_float:
-            return None
-        if not self.key_increase or not self.key_decrease:
-            return None
-
-        baseline = self.read_telemetry()
-        if baseline is None:
-            return None
-
-        # Pulse upward and measure the delta
-        click_pulse(self.key_increase, is_float=True)
-        time.sleep(0.08)
-        raised = self.read_telemetry()
-
-        if raised is None:
-            return None
-
-        step = abs(float(raised) - float(baseline))
-
-        # Try to return near the starting point
-        click_pulse(self.key_decrease, is_float=True)
-        time.sleep(0.08)
-
-        if step < 1e-6:
-            return None
-
-        return step
-
-    def _resolve_target(self, target: float) -> float:
-        """Align float targets to the nearest reachable increment when needed."""
-        if not self.is_float:
-            return target
-
-        step = self._detect_float_step()
-        current = self.read_telemetry()
-
-        if step is None or step <= 0 or current is None:
-            return target
-
-        aligned = current + round((target - current) / step) * step
-
-        if abs(aligned - target) >= 0.0005:
-            if self.update_status:
-                self.update_status(f"Rounded to {aligned:.3f}", "orange")
-            if self.app:
-                short_name = self.var_name.replace("dc", "")
-                self.app.notify_overlay_status(
-                    f"{short_name}: using {aligned:.3f} (nearest)",
-                    "orange"
-                )
-
-        return aligned
-
-    def adjust_to_target(self, target: float):
-        """
-        Adjust variable to target value using discrete key presses.
-        
-        Args:
-            target: Target value to reach
-        """
-        if self.running_action:
-            return
-
-        if not self.key_increase or not self.key_decrease:
-            if self.update_status:
-                self.update_status("No keys configured", "red")
-            if self.app:
-                self.app.notify_overlay_status(
-                    f"{self.var_name.replace('dc', '')}: No keys", 
-                    "red"
-                )
-            return
-
-        self.running_action = True
-        short_name = self.var_name.replace("dc", "")
-
-        target = self._resolve_target(target)
-        if not self.is_float:
-            target = int(round(target))
-
-        if self.update_status:
-            self.update_status("Adjusting...", "orange")
-        if self.app:
-            self.app.notify_overlay_status(
-                f"Adjusting {short_name} -> {target}",
-                "orange"
-            )
-
-        timeout = time.time() + 8
-        success = False
-
-        try:
-            while time.time() < timeout:
-                # Abort if entering CONFIG mode
-                if self.app and self.app.app_state != "RUNNING":
-                    break
-
-                current = self.read_telemetry()
-                if current is None:
-                    break
-
-                diff = target - current
-                abs_diff = abs(diff)
-
-                # Check if target reached
-                if self.is_float and abs_diff < 0.001:
-                    success = True
-                    break
-                if not self.is_float and diff == 0:
-                    success = True
-                    break
-
-                # Press appropriate key
-                key = self.key_increase if diff > 0 else self.key_decrease
-                click_pulse(key, self.is_float)
-                time.sleep(0.02)
-
-        except Exception as e:
-            print(f"[GenericController] Exception: {e}")
-        finally:
-            if success:
-                message = f"{short_name} OK ({target})"
-                if self.update_status:
-                    self.update_status("Ready", "green")
-                if self.app:
-                    self.app.notify_overlay_status(message, "green")
-                    if self.app.use_tts.get():
-                        speak_text(message)
-            else:
-                status = "Cancelled" if (
-                    self.app and self.app.app_state != "RUNNING"
-                ) else "Failed"
-                
-                if self.update_status:
-                    self.update_status(status, "red")
-                if self.app:
-                    status_msg = (
-                        f"{short_name} Cancelled" 
-                        if self.app.app_state != "RUNNING" 
-                        else f"{short_name} Failed"
-                    )
-                    self.app.notify_overlay_status(status_msg, "red")
-
-            self.running_action = False
-
-    def find_minimum_effective_timing(
-        self,
-        start_ms: int = 1,
-        max_ms: int = 120,
-        step_ms: int = 1,
-        settle_s: float = 0.05,
-        confirmation_attempts: int = 2
-    ) -> Optional[int]:
-        """
-        Probe the minimal pulse timing that reliably updates telemetry.
-
-        The probe fires fast pulses starting at ``start_ms`` and increments by
-        ``step_ms`` until telemetry reflects a change. The first timing that
-        consistently registers is returned.
-
-        Args:
-            start_ms: Initial press/interval duration in milliseconds.
-            max_ms: Maximum duration to test in milliseconds.
-            step_ms: Increment between attempts in milliseconds.
-            settle_s: Delay after a pulse to allow telemetry to settle.
-            confirmation_attempts: Number of retries per timing bucket.
-
-        Returns:
-            Suggested minimal working pulse duration in milliseconds, or None
-            if no timing within bounds registers.
-        """
-        if not self.key_increase or not self.key_decrease:
-            raise ValueError("Increase/decrease keys must be configured before probing.")
-
-        baseline = self.read_telemetry()
-        if baseline is None:
-            return None
-
-        def _changed(old, new) -> bool:
-            if old is None or new is None:
-                return False
-            if self.is_float:
-                return abs(float(new) - float(old)) >= 0.0005
-            return int(round(new)) != int(round(old))
-
-        def _restore(target_value: float, timing_ms: int):
-            """Attempt to revert telemetry back near baseline after a test."""
-            for _ in range(5):
-                current = self.read_telemetry()
-                if current is None:
-                    break
-                if not _changed(target_value, current):
-                    break
-                direction = self.key_decrease if current > target_value else self.key_increase
-                _direct_pulse(direction, timing_ms, timing_ms)
-                time.sleep(settle_s)
-
-        for delay_ms in range(max(1, start_ms), max_ms + 1, max(1, step_ms)):
-            success_count = 0
-            for _ in range(max(1, confirmation_attempts)):
-                _direct_pulse(self.key_increase, delay_ms, delay_ms)
-                time.sleep(settle_s)
-                updated = self.read_telemetry()
-                if _changed(baseline, updated):
-                    success_count += 1
-                else:
-                    break
-
-            _restore(baseline, delay_ms)
-
-            if success_count >= confirmation_attempts:
-                return delay_ms
-
-        return None
 
 
 # ======================================================================

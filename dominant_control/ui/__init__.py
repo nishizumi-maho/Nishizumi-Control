@@ -1,15 +1,9 @@
-"""UI components for Dominant Control."""
-
-from dominant_control.ui.combo_tab import ComboTab
-from dominant_control.ui.control_tab import ControlTab
-from dominant_control.ui.device_selector import DeviceSelector
-from dominant_control.ui.overlay_window import OverlayWindow
-from dominant_control.ui.timing_window import GlobalTimingWindow
+from .widgets import ScrollableFrame
+from .control_tab import ControlTab
+from .combo_tab import ComboTab
 
 __all__ = [
-    "ComboTab",
+    "ScrollableFrame",
     "ControlTab",
-    "DeviceSelector",
-    "GlobalTimingWindow",
-    "OverlayWindow",
+    "ComboTab",
 ]

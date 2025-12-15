@@ -30,6 +30,8 @@ import subprocess
 import importlib
 import queue
 import numbers
+import tempfile
+import wave
 from typing import Dict, List, Tuple, Optional, Any, Callable
 
 # ======================================================================
@@ -54,6 +56,14 @@ try:
 except ImportError:
     HAS_TTS = False
     print("Warning: 'pyttsx3' not installed. TTS disabled.")
+
+try:
+    import pyaudio
+    HAS_PYAUDIO = True
+except ImportError:
+    pyaudio = None
+    HAS_PYAUDIO = False
+    print("Warning: 'pyaudio' not installed. Audio device selection limited.")
 
 _speech_spec = importlib.util.find_spec("speech_recognition")
 if _speech_spec is not None:
@@ -107,6 +117,7 @@ _TTS_ENGINE = None
 _TTS_THREAD: Optional[threading.Thread] = None
 _TTS_QUEUE: "queue.Queue[str]" = queue.Queue()
 _TTS_LOCK = threading.Lock()
+TTS_OUTPUT_DEVICE_INDEX: Optional[int] = None
 
 # Voice tuning defaults (speech recognition responsiveness/accuracy)
 VOICE_TUNING_DEFAULTS = {
@@ -444,6 +455,43 @@ def _ensure_tts_engine():
     return _TTS_ENGINE
 
 
+def _play_wave_file(path: str, output_device: Optional[int]) -> bool:
+    """Play a WAV file via PyAudio on the selected output device."""
+
+    if not HAS_PYAUDIO:
+        return False
+
+    try:
+        with wave.open(path, "rb") as wf:
+            pa = pyaudio.PyAudio()
+            try:
+                stream_params = dict(
+                    format=pa.get_format_from_width(wf.getsampwidth()),
+                    channels=wf.getnchannels(),
+                    rate=wf.getframerate(),
+                    output=True
+                )
+                if output_device is not None and output_device >= 0:
+                    stream_params["output_device_index"] = int(output_device)
+
+                stream = pa.open(**stream_params)
+                try:
+                    data = wf.readframes(1024)
+                    while data:
+                        stream.write(data)
+                        data = wf.readframes(1024)
+                finally:
+                    stream.stop_stream()
+                    stream.close()
+            finally:
+                pa.terminate()
+    except Exception as exc:  # noqa: PERF203
+        print(f"[TTS] Audio playback failed: {exc}")
+        return False
+
+    return True
+
+
 def _tts_worker():
     """Background worker to serialize speech requests and reduce latency."""
     while True:
@@ -457,8 +505,23 @@ def _tts_worker():
             continue
 
         try:
-            engine.say(text)
-            engine.runAndWait()
+            if TTS_OUTPUT_DEVICE_INDEX is not None and HAS_PYAUDIO:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                    temp_path = tmp.name
+                try:
+                    engine.save_to_file(text, temp_path)
+                    engine.runAndWait()
+                    if not _play_wave_file(temp_path, TTS_OUTPUT_DEVICE_INDEX):
+                        engine.say(text)
+                        engine.runAndWait()
+                finally:
+                    try:
+                        os.remove(temp_path)
+                    except Exception:
+                        pass
+            else:
+                engine.say(text)
+                engine.runAndWait()
         except Exception as exc:  # noqa: PERF203
             print(f"[TTS] Playback failed: {exc}")
         finally:
@@ -751,6 +814,7 @@ class VoiceListener:
         self.vosk_model_path: str = ""
         self.vosk_model: Optional[Any] = None
         self._vosk_error: Optional[str] = None
+        self.device_index: Optional[int] = None
         self.ambient_duration = VOICE_TUNING_DEFAULTS["ambient_duration"]
         self.initial_timeout = VOICE_TUNING_DEFAULTS["initial_timeout"]
         self.continuous_timeout = VOICE_TUNING_DEFAULTS["continuous_timeout"]
@@ -777,6 +841,14 @@ class VoiceListener:
             self.start()
         else:
             self.stop()
+
+    def set_device_index(self, device_index: Optional[int]):
+        """Update the microphone device index and restart listener if needed."""
+
+        self.device_index = device_index
+        if self.running:
+            self.stop()
+            self.start()
 
     def start(self):
         if self.running or not self.available:
@@ -914,7 +986,7 @@ class VoiceListener:
             return
 
         try:
-            with sr.Microphone() as source:
+            with sr.Microphone(device_index=self.device_index) as source:
                 self._apply_recognizer_settings(self.recognizer)
                 if not self._noise_adjusted:
                     try:
@@ -986,7 +1058,7 @@ class VoiceListener:
         self._apply_recognizer_settings(recognizer)
 
         try:
-            with sr.Microphone() as source:
+            with sr.Microphone(device_index=self.device_index) as source:
                 try:
                     recognizer.adjust_for_ambient_noise(
                         source,
@@ -2816,6 +2888,7 @@ class iRacingControlApp:
         self.tabs: Dict[str, ControlTab] = {}
         self.combo_tab: Optional[ComboTab] = None
         self.overlay_tab: Optional[OverlayConfigTab] = None
+        self.voice_window: Optional[tk.Toplevel] = None
 
         # Presets: saved_presets[car][track] = config
         self.saved_presets: Dict[str, Dict[str, Dict[str, Any]]] = {}
@@ -2849,6 +2922,13 @@ class iRacingControlApp:
         self.use_voice = tk.BooleanVar(value=False)
         self.voice_engine = tk.StringVar(value="speech")
         self.vosk_model_path = tk.StringVar(value="")
+        self.microphone_device = tk.IntVar(value=-1)
+        self.audio_output_device = tk.IntVar(value=-1)
+        self.vosk_status_var = tk.StringVar(value="")
+        self.voice_engine_combo: Optional[ttk.Combobox] = None
+        self.btn_vosk_model: Optional[tk.Button] = None
+        self.mic_combo: Optional[ttk.Combobox] = None
+        self.audio_output_combo: Optional[ttk.Combobox] = None
         self.voice_ambient_duration = tk.DoubleVar(
             value=VOICE_TUNING_DEFAULTS["ambient_duration"]
         )
@@ -2869,6 +2949,7 @@ class iRacingControlApp:
         self.auto_restart_on_rescan = tk.BooleanVar(value=True)
         self.auto_restart_on_race = tk.BooleanVar(value=True)
         self.voice_phrase_map: Dict[str, Callable] = {}
+        self._voice_traces_attached = False
 
         # Load configuration
         self.load_config()
@@ -2983,12 +3064,16 @@ class iRacingControlApp:
         menubar.add_cascade(label="Options", menu=options_menu)
 
         options_menu.add_command(
-            label="Timing Adjustments", 
+            label="Timing Adjustments",
             command=self.open_timing_window
+        )
+        options_menu.add_command(
+            label="Voice/Audio Settings",
+            command=self.open_voice_audio_settings
         )
         options_menu.add_separator()
         options_menu.add_command(
-            label="Show/Hide Overlay", 
+            label="Show/Hide Overlay",
             command=self.toggle_overlay
         )
         options_menu.add_command(
@@ -3037,153 +3122,11 @@ class iRacingControlApp:
             font=("Arial", 8)
         ).pack(side="left", padx=4)
 
-        if HAS_TTS:
-            tk.Checkbutton(
-                settings_frame,
-                text="Voice (TTS)",
-                variable=self.use_tts
-            ).pack(side="right")
-
-        voice_check = tk.Checkbutton(
-            settings_frame,
-            text="Voice Triggers",
-            variable=self.use_voice,
-            state=("normal" if HAS_SPEECH else "disabled"),
-            command=self.register_current_listeners
-        )
-        voice_check.pack(side="right", padx=6)
-
         tk.Button(
             settings_frame,
-            text="Testar Voz",
-            command=self.open_voice_test_dialog,
-            state=("normal" if HAS_SPEECH else "disabled")
-        ).pack(side="right", padx=4)
-
-        if not HAS_SPEECH:
-            tk.Label(
-                settings_frame,
-                text="(Install 'speech_recognition' for voice)",
-                fg="gray",
-                font=("Arial", 8)
-            ).pack(side="right", padx=4)
-
-        voice_engine_frame = tk.Frame(self.root)
-        voice_engine_frame.pack(fill="x", padx=10, pady=(0, 5))
-
-        ttk.Label(voice_engine_frame, text="Voice Engine:").pack(side="left")
-        engine_options = ["speech"] + (["vosk"] if HAS_VOSK else [])
-        self.voice_engine_combo = ttk.Combobox(
-            voice_engine_frame,
-            values=engine_options,
-            state="readonly",
-            width=12
-        )
-        default_engine = self.voice_engine.get()
-        if default_engine not in engine_options:
-            default_engine = "speech"
-            self.voice_engine.set(default_engine)
-        self.voice_engine_combo.set(default_engine)
-        self.voice_engine_combo.bind(
-            "<<ComboboxSelected>>",
-            lambda _evt: self.on_voice_engine_changed()
-        )
-        self.voice_engine_combo.pack(side="left", padx=4)
-
-        self.btn_vosk_model = tk.Button(
-            voice_engine_frame,
-            text="Select Vosk Model...",
-            command=self.choose_vosk_model
-        )
-        self.btn_vosk_model.pack(side="left", padx=4)
-
-        self.vosk_status_var = tk.StringVar(value="")
-        tk.Label(
-            voice_engine_frame,
-            textvariable=self.vosk_status_var,
-            fg="gray"
-        ).pack(side="left", padx=6)
-
-        tuning_frame = tk.LabelFrame(
-            self.root,
-            text="Ajustes de Voz (precisão e velocidade)"
-        )
-        tuning_frame.pack(fill="x", padx=10, pady=(0, 5))
-
-        tuning_row_1 = tk.Frame(tuning_frame)
-        tuning_row_1.pack(fill="x", padx=6, pady=2)
-
-        ttk.Label(tuning_row_1, text="Ruído ambiente (s):").pack(side="left")
-        ttk.Spinbox(
-            tuning_row_1,
-            from_=0.0,
-            to=3.0,
-            increment=0.1,
-            width=6,
-            textvariable=self.voice_ambient_duration
-        ).pack(side="left", padx=4)
-
-        ttk.Label(tuning_row_1, text="Duração máx. da frase (s):").pack(side="left")
-        ttk.Spinbox(
-            tuning_row_1,
-            from_=0.2,
-            to=6.0,
-            increment=0.1,
-            width=6,
-            textvariable=self.voice_phrase_time_limit
-        ).pack(side="left", padx=4)
-
-        tk.Checkbutton(
-            tuning_row_1,
-            text="Energia dinâmica (auto)",
-            variable=self.voice_dynamic_energy
-        ).pack(side="left", padx=8)
-
-        tuning_row_2 = tk.Frame(tuning_frame)
-        tuning_row_2.pack(fill="x", padx=6, pady=2)
-
-        ttk.Label(tuning_row_2, text="Timeout inicial (s):").pack(side="left")
-        ttk.Spinbox(
-            tuning_row_2,
-            from_=0.0,
-            to=5.0,
-            increment=0.1,
-            width=6,
-            textvariable=self.voice_initial_timeout
-        ).pack(side="left", padx=4)
-
-        ttk.Label(tuning_row_2, text="Timeout contínuo (s):").pack(side="left")
-        ttk.Spinbox(
-            tuning_row_2,
-            from_=0.0,
-            to=5.0,
-            increment=0.1,
-            width=6,
-            textvariable=self.voice_continuous_timeout
-        ).pack(side="left", padx=4)
-
-        ttk.Label(tuning_row_2, text="Energia mínima: ").pack(side="left")
-        ttk.Entry(
-            tuning_row_2,
-            width=8,
-            textvariable=self.voice_energy_threshold
-        ).pack(side="left", padx=4)
-        tk.Label(
-            tuning_row_2,
-            text="(vazio = automático)",
-            fg="gray",
-            font=("Arial", 8)
-        ).pack(side="left", padx=2)
-
-        for var in (
-            self.voice_ambient_duration,
-            self.voice_phrase_time_limit,
-            self.voice_initial_timeout,
-            self.voice_continuous_timeout,
-            self.voice_energy_threshold,
-            self.voice_dynamic_energy
-        ):
-            var.trace_add("write", self.on_voice_tuning_changed)
+            text="Opções de Voz/Áudio",
+            command=self.open_voice_audio_settings
+        ).pack(side="right")
 
         # Auto-detect
         auto_frame = tk.Frame(self.root)
@@ -3288,6 +3231,318 @@ class iRacingControlApp:
 
         self.rebuild_tabs(self.active_vars)
         self.update_preset_ui()
+
+    # ------------------------------------------------------------------
+    # Options UI
+    # ------------------------------------------------------------------
+    def _list_microphones(self) -> List[Tuple[int, str]]:
+        devices: List[Tuple[int, str]] = [(-1, "Padrão do sistema")]
+        if not HAS_SPEECH:
+            return devices
+
+        try:
+            mic_names = sr.Microphone.list_microphone_names() or []
+            for idx, name in enumerate(mic_names):
+                devices.append((idx, name))
+        except Exception as exc:  # noqa: PERF203
+            print(f"[Voice] Unable to list microphones: {exc}")
+
+        return devices
+
+    def _list_output_devices(self) -> List[Tuple[int, str]]:
+        devices: List[Tuple[int, str]] = [(-1, "Padrão do sistema")]
+        if not HAS_PYAUDIO:
+            return devices
+
+        try:
+            pa = pyaudio.PyAudio()
+            try:
+                for idx in range(pa.get_device_count()):
+                    info = pa.get_device_info_by_index(idx)
+                    if info.get("maxOutputChannels", 0) > 0:
+                        name = info.get("name", f"Output {idx}")
+                        devices.append((idx, name))
+            finally:
+                pa.terminate()
+        except Exception as exc:  # noqa: PERF203
+            print(f"[Audio] Unable to list output devices: {exc}")
+
+        return devices
+
+    @staticmethod
+    def _device_label(idx: int, name: str) -> str:
+        return f"[{idx}] {name}"
+
+    @staticmethod
+    def _parse_device_index(label: str) -> int:
+        try:
+            start = label.find("[")
+            end = label.find("]")
+            return int(label[start + 1:end]) if start >= 0 and end > start else -1
+        except Exception:
+            return -1
+
+    def _apply_audio_preferences(self):
+        """Send selected devices to voice listener and TTS engine."""
+
+        mic_index = self.microphone_device.get()
+        voice_listener.set_device_index(mic_index if mic_index >= 0 else None)
+
+        output_index = self.audio_output_device.get()
+        global TTS_OUTPUT_DEVICE_INDEX
+        TTS_OUTPUT_DEVICE_INDEX = output_index if output_index >= 0 else None
+
+    def _refresh_audio_device_lists(self):
+        mic_devices = self._list_microphones()
+        if self.microphone_device.get() not in [i for i, _ in mic_devices]:
+            self.microphone_device.set(-1)
+        mic_labels = [self._device_label(idx, name) for idx, name in mic_devices]
+        if self.mic_combo:
+            self.mic_combo["values"] = mic_labels
+            current_label = self._device_label(
+                self.microphone_device.get() if self.microphone_device.get() in [i for i, _ in mic_devices] else -1,
+                dict(mic_devices).get(self.microphone_device.get(), "Padrão do sistema")
+            )
+            self.mic_combo.set(current_label)
+
+        output_devices = self._list_output_devices()
+        if self.audio_output_device.get() not in [i for i, _ in output_devices]:
+            self.audio_output_device.set(-1)
+        output_labels = [self._device_label(idx, name) for idx, name in output_devices]
+        if self.audio_output_combo:
+            self.audio_output_combo["values"] = output_labels
+            current_output_label = self._device_label(
+                self.audio_output_device.get() if self.audio_output_device.get() in [i for i, _ in output_devices] else -1,
+                dict(output_devices).get(self.audio_output_device.get(), "Padrão do sistema")
+            )
+            self.audio_output_combo.set(current_output_label)
+
+    def _on_microphone_selected(self, *_):
+        selection = self._parse_device_index(self.mic_combo.get()) if self.mic_combo else -1
+        self.microphone_device.set(selection)
+        self._apply_audio_preferences()
+        self.schedule_save()
+
+    def _on_output_selected(self, *_):
+        selection = self._parse_device_index(self.audio_output_combo.get()) if self.audio_output_combo else -1
+        self.audio_output_device.set(selection)
+        self._apply_audio_preferences()
+        self.schedule_save()
+
+    def open_voice_audio_settings(self):
+        """Open the options window focused on voice and audio settings."""
+
+        if hasattr(self, "voice_window") and self.voice_window.winfo_exists():
+            self.voice_window.lift()
+            return
+
+        self.voice_window = tk.Toplevel(self.root)
+        self.voice_window.title("Opções de Voz e Áudio")
+        self.voice_window.geometry("720x520")
+
+        def _cleanup():
+            if self.voice_window and self.voice_window.winfo_exists():
+                self.voice_window.destroy()
+            self.voice_window = None
+            self.voice_engine_combo = None
+            self.btn_vosk_model = None
+            self.mic_combo = None
+            self.audio_output_combo = None
+
+        self.voice_window.protocol("WM_DELETE_WINDOW", _cleanup)
+
+        notebook = ttk.Notebook(self.voice_window)
+        notebook.pack(fill="both", expand=True, padx=10, pady=10)
+
+        voice_tab = ttk.Frame(notebook)
+        notebook.add(voice_tab, text="Voz/Áudio")
+        self._build_voice_audio_tab(voice_tab)
+
+        notebook.select(voice_tab)
+
+    def _build_voice_audio_tab(self, parent: tk.Widget):
+        """Construct the tab containing voice and audio controls."""
+
+        toggles_frame = tk.Frame(parent)
+        toggles_frame.pack(fill="x", pady=4)
+
+        if HAS_TTS:
+            tk.Checkbutton(
+                toggles_frame,
+                text="Voice (TTS)",
+                variable=self.use_tts,
+                command=self.schedule_save
+            ).pack(side="left", padx=4)
+
+        tk.Checkbutton(
+            toggles_frame,
+            text="Voice Triggers",
+            variable=self.use_voice,
+            state=("normal" if HAS_SPEECH else "disabled"),
+            command=self.on_voice_toggle
+        ).pack(side="left", padx=4)
+
+        tk.Button(
+            toggles_frame,
+            text="Testar Voz",
+            command=self.open_voice_test_dialog,
+            state=("normal" if HAS_SPEECH else "disabled")
+        ).pack(side="left", padx=4)
+
+        if not HAS_SPEECH:
+            tk.Label(
+                toggles_frame,
+                text="(Install 'speech_recognition' for voice)",
+                fg="gray",
+                font=("Arial", 8)
+            ).pack(side="left", padx=4)
+
+        engine_frame = tk.LabelFrame(parent, text="Motor de Reconhecimento")
+        engine_frame.pack(fill="x", padx=2, pady=6)
+
+        ttk.Label(engine_frame, text="Voice Engine:").pack(side="left", padx=4)
+        engine_options = ["speech"] + (["vosk"] if HAS_VOSK else [])
+        self.voice_engine_combo = ttk.Combobox(
+            engine_frame,
+            values=engine_options,
+            state="readonly",
+            width=12
+        )
+        default_engine = self.voice_engine.get()
+        if default_engine not in engine_options:
+            default_engine = "speech"
+            self.voice_engine.set(default_engine)
+        self.voice_engine_combo.set(default_engine)
+        self.voice_engine_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda _evt: self.on_voice_engine_changed()
+        )
+        self.voice_engine_combo.pack(side="left", padx=4)
+
+        self.btn_vosk_model = tk.Button(
+            engine_frame,
+            text="Select Vosk Model...",
+            command=self.choose_vosk_model
+        )
+        self.btn_vosk_model.pack(side="left", padx=4)
+
+        tk.Label(
+            engine_frame,
+            textvariable=self.vosk_status_var,
+            fg="gray"
+        ).pack(side="left", padx=6)
+
+        device_frame = tk.LabelFrame(parent, text="Dispositivos de Entrada/Saída")
+        device_frame.pack(fill="x", padx=2, pady=6)
+
+        mic_row = tk.Frame(device_frame)
+        mic_row.pack(fill="x", padx=6, pady=2)
+
+        ttk.Label(mic_row, text="Microfone:").pack(side="left")
+        self.mic_combo = ttk.Combobox(mic_row, state="readonly", width=50)
+        self.mic_combo.pack(side="left", padx=4, fill="x", expand=True)
+        self.mic_combo.bind("<<ComboboxSelected>>", self._on_microphone_selected)
+
+        out_row = tk.Frame(device_frame)
+        out_row.pack(fill="x", padx=6, pady=2)
+
+        ttk.Label(out_row, text="Saída de Áudio (TTS):").pack(side="left")
+        self.audio_output_combo = ttk.Combobox(out_row, state="readonly", width=50)
+        self.audio_output_combo.pack(side="left", padx=4, fill="x", expand=True)
+        self.audio_output_combo.bind("<<ComboboxSelected>>", self._on_output_selected)
+
+        tk.Button(
+            device_frame,
+            text="Atualizar dispositivos",
+            command=self._refresh_audio_device_lists
+        ).pack(anchor="e", padx=6, pady=4)
+
+        tuning_frame = tk.LabelFrame(
+            parent,
+            text="Ajustes de Voz (precisão e velocidade)"
+        )
+        tuning_frame.pack(fill="x", padx=2, pady=(6, 4))
+
+        tuning_row_1 = tk.Frame(tuning_frame)
+        tuning_row_1.pack(fill="x", padx=6, pady=2)
+
+        ttk.Label(tuning_row_1, text="Ruído ambiente (s):").pack(side="left")
+        ttk.Spinbox(
+            tuning_row_1,
+            from_=0.0,
+            to=3.0,
+            increment=0.1,
+            width=6,
+            textvariable=self.voice_ambient_duration
+        ).pack(side="left", padx=4)
+
+        ttk.Label(tuning_row_1, text="Duração máx. da frase (s):").pack(side="left")
+        ttk.Spinbox(
+            tuning_row_1,
+            from_=0.2,
+            to=6.0,
+            increment=0.1,
+            width=6,
+            textvariable=self.voice_phrase_time_limit
+        ).pack(side="left", padx=4)
+
+        tk.Checkbutton(
+            tuning_row_1,
+            text="Energia dinâmica (auto)",
+            variable=self.voice_dynamic_energy
+        ).pack(side="left", padx=8)
+
+        tuning_row_2 = tk.Frame(tuning_frame)
+        tuning_row_2.pack(fill="x", padx=6, pady=2)
+
+        ttk.Label(tuning_row_2, text="Timeout inicial (s):").pack(side="left")
+        ttk.Spinbox(
+            tuning_row_2,
+            from_=0.0,
+            to=5.0,
+            increment=0.1,
+            width=6,
+            textvariable=self.voice_initial_timeout
+        ).pack(side="left", padx=4)
+
+        ttk.Label(tuning_row_2, text="Timeout contínuo (s):").pack(side="left")
+        ttk.Spinbox(
+            tuning_row_2,
+            from_=0.0,
+            to=5.0,
+            increment=0.1,
+            width=6,
+            textvariable=self.voice_continuous_timeout
+        ).pack(side="left", padx=4)
+
+        ttk.Label(tuning_row_2, text="Energia mínima: ").pack(side="left")
+        ttk.Entry(
+            tuning_row_2,
+            width=8,
+            textvariable=self.voice_energy_threshold
+        ).pack(side="left", padx=4)
+        tk.Label(
+            tuning_row_2,
+            text="(vazio = automático)",
+            fg="gray",
+            font=("Arial", 8)
+        ).pack(side="left", padx=2)
+
+        if not self._voice_traces_attached:
+            for var in (
+                self.voice_ambient_duration,
+                self.voice_phrase_time_limit,
+                self.voice_initial_timeout,
+                self.voice_continuous_timeout,
+                self.voice_energy_threshold,
+                self.voice_dynamic_energy
+            ):
+                var.trace_add("write", self.on_voice_tuning_changed)
+
+            self._voice_traces_attached = True
+
+        self._refresh_audio_device_lists()
+        self._update_voice_controls()
 
     def toggle_mode(self):
         """Toggle between RUNNING and CONFIG modes."""
@@ -3974,6 +4229,8 @@ class iRacingControlApp:
             "voice_engine": self.voice_engine.get(),
             "vosk_model_path": self.vosk_model_path.get(),
             "voice_tuning": self._voice_tuning_config(),
+            "microphone_device": self.microphone_device.get(),
+            "audio_output_device": self.audio_output_device.get(),
             "auto_detect": self.auto_detect.get(),
             "auto_restart_on_rescan": self.auto_restart_on_rescan.get(),
             "auto_restart_on_race": self.auto_restart_on_race.get(),
@@ -4016,6 +4273,8 @@ class iRacingControlApp:
         self.use_voice.set(data.get("use_voice", False))
         self.voice_engine.set(data.get("voice_engine", "speech"))
         self.vosk_model_path.set(data.get("vosk_model_path", ""))
+        self.microphone_device.set(data.get("microphone_device", -1))
+        self.audio_output_device.set(data.get("audio_output_device", -1))
         self._set_voice_tuning_vars(
             data.get("voice_tuning", VOICE_TUNING_DEFAULTS)
         )
@@ -4158,7 +4417,9 @@ class iRacingControlApp:
 
     def on_voice_engine_changed(self):
         """Handle engine dropdown changes."""
-        selection = self.voice_engine_combo.get()
+        selection = (
+            self.voice_engine_combo.get() if self.voice_engine_combo else self.voice_engine.get()
+        )
         if selection not in {"speech", "vosk"}:
             selection = "speech"
 
@@ -4182,11 +4443,14 @@ class iRacingControlApp:
     def _update_voice_controls(self):
         """Refresh UI state and listener config for voice engine selection."""
         voice_listener.update_tuning(self._voice_tuning_config())
+        self._apply_audio_preferences()
         engine = self.voice_engine.get()
         if engine == "vosk" and not HAS_VOSK:
             engine = "speech"
             self.voice_engine.set(engine)
-            self.voice_engine_combo.set(engine)
+
+            if self.voice_engine_combo:
+                self.voice_engine_combo.set(engine)
 
         if engine == "vosk":
             voice_listener.set_engine(engine, self.vosk_model_path.get())
@@ -4194,7 +4458,8 @@ class iRacingControlApp:
             voice_listener.set_engine("speech", "")
 
         btn_state = "normal" if engine == "vosk" and HAS_VOSK else "disabled"
-        self.btn_vosk_model.config(state=btn_state)
+        if self.btn_vosk_model:
+            self.btn_vosk_model.config(state=btn_state)
         self.vosk_status_var.set(self._format_vosk_status())
 
     def open_voice_test_dialog(self):
@@ -4217,6 +4482,12 @@ class iRacingControlApp:
             return
 
         VoiceTestDialog(self.root, self, phrases_map)
+
+    def on_voice_toggle(self):
+        """Persist and (re)register voice triggers when toggled."""
+
+        self.register_current_listeners()
+        self.schedule_save()
 
     def register_current_listeners(self):
         """Register keyboard/joystick listeners based on current config."""

@@ -647,6 +647,8 @@ class VoiceListener:
         self.running = False
         self.thread: Optional[threading.Thread] = None
         self.lock = threading.Lock()
+        self._noise_adjusted = False
+        self.last_engine: Optional[str] = None
 
     def set_phrases(self, phrases: Dict[str, Callable]):
         """Replace the phrase→callback map."""
@@ -681,16 +683,19 @@ class VoiceListener:
         if not rec:
             return None
 
-        engines = []
+        engines: List[Tuple[str, Callable]] = []
         if hasattr(rec, "recognize_sapi"):
-            engines.append(rec.recognize_sapi)
+            engines.append(("sapi", rec.recognize_sapi))
         if hasattr(rec, "recognize_sphinx"):
-            engines.append(rec.recognize_sphinx)
-        engines.append(rec.recognize_google)
+            engines.append(("sphinx", rec.recognize_sphinx))
+        if hasattr(rec, "recognize_google"):
+            engines.append(("google", rec.recognize_google))
 
-        for engine in engines:
+        for name, engine in engines:
             try:
-                return engine(audio)
+                result = engine(audio)
+                self.last_engine = name
+                return result
             except Exception:
                 continue
 
@@ -702,18 +707,32 @@ class VoiceListener:
 
         try:
             with sr.Microphone() as source:
-                try:
-                    self.recognizer.adjust_for_ambient_noise(source, duration=0.4)
-                except Exception:
-                    pass
+                if not self._noise_adjusted:
+                    try:
+                        self.recognizer.adjust_for_ambient_noise(
+                            source,
+                            duration=0.2
+                        )
+                        self._noise_adjusted = True
+                    except Exception:
+                        pass
+
+                # Provide a slightly longer initial wait so the user can start
+                # speaking before the listener times out, then use a steady
+                # shorter timeout to avoid long blocking periods.
+                listen_timeout = 1.0
 
                 while self.running:
                     try:
                         audio = self.recognizer.listen(
                             source,
-                            timeout=1,
-                            phrase_time_limit=4
+                            timeout=listen_timeout,
+                            phrase_time_limit=1.2
                         )
+                        # After the first capture, keep a shorter timeout to
+                        # remain responsive while still avoiding premature
+                        # timeouts on slower environments.
+                        listen_timeout = 0.8
                     except getattr(sr, "WaitTimeoutError", Exception):
                         continue
                     except Exception:
@@ -737,8 +756,8 @@ class VoiceListener:
 
     def capture_once(
         self,
-        timeout: float = 3.0,
-        phrase_time_limit: float = 4.0
+        timeout: float = 1.0,
+        phrase_time_limit: float = 1.2
     ) -> Tuple[Optional[str], Optional[str]]:
         """Capture a single voice input for testing purposes."""
 
@@ -750,7 +769,7 @@ class VoiceListener:
         try:
             with sr.Microphone() as source:
                 try:
-                    recognizer.adjust_for_ambient_noise(source, duration=0.4)
+                    recognizer.adjust_for_ambient_noise(source, duration=0.2)
                 except Exception:
                     pass
 

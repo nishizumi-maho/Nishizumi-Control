@@ -144,6 +144,59 @@ except ImportError:
     vosk = None
     HAS_VOSK = False
 
+
+# Optional XInput support (Windows-only, non-exclusive controller polling)
+if os.name == "nt":
+    class XINPUT_GAMEPAD(ctypes.Structure):
+        _fields_ = [
+            ("wButtons", ctypes.c_ushort),
+            ("bLeftTrigger", ctypes.c_ubyte),
+            ("bRightTrigger", ctypes.c_ubyte),
+            ("sThumbLX", ctypes.c_short),
+            ("sThumbLY", ctypes.c_short),
+            ("sThumbRX", ctypes.c_short),
+            ("sThumbRY", ctypes.c_short)
+        ]
+
+    class XINPUT_STATE(ctypes.Structure):
+        _fields_ = [
+            ("dwPacketNumber", ctypes.c_ulong),
+            ("Gamepad", XINPUT_GAMEPAD)
+        ]
+
+    XINPUT_BUTTONS = [
+        ("DPAD_UP", 0x0001),
+        ("DPAD_DOWN", 0x0002),
+        ("DPAD_LEFT", 0x0004),
+        ("DPAD_RIGHT", 0x0008),
+        ("START", 0x0010),
+        ("BACK", 0x0020),
+        ("LEFT_THUMB", 0x0040),
+        ("RIGHT_THUMB", 0x0080),
+        ("LEFT_SHOULDER", 0x0100),
+        ("RIGHT_SHOULDER", 0x0200),
+        ("GUIDE", 0x0400),
+        ("A", 0x1000),
+        ("B", 0x2000),
+        ("X", 0x4000),
+        ("Y", 0x8000)
+    ]
+
+    def _load_xinput_library():
+        """Attempt to load an available XInput DLL."""
+        for dll in ("XInput1_4.dll", "XInput1_3.dll", "XInput9_1_0.dll"):
+            try:
+                return ctypes.windll.LoadLibrary(dll)
+            except OSError:
+                continue
+        return None
+else:
+    XINPUT_BUTTONS: List[Tuple[str, int]] = []
+
+    def _load_xinput_library():
+        return None
+
+
 # ======================================================================
 # GLOBAL CONFIGURATION
 # ======================================================================
@@ -653,14 +706,30 @@ class InputManager:
         self.active: bool = False
         self.allowed_devices: List[str] = []
         self.safe_mode: bool = False
+        self.backend: str = "pygame"
+        self.available_backends: List[str] = []
         self._input_thread: Optional[threading.Thread] = None
+        self._input_stop_event = threading.Event()
         self._input_watchdog = Watchdog(
             "InputManager", interval_s=2.5, timeout_s=8.0, on_trip=self._restart_input_loop
         )
         # Prevent SDL from grabbing exclusive haptics/XInput handles when we only need button input
         self.preserve_game_ffb: bool = os.getenv("DOMINANTCONTROL_PRESERVE_FFB", "1") == "1"
 
+        self._xinput = _load_xinput_library() if os.name == "nt" else None
+        self._xinput_last_buttons: Dict[int, int] = {}
+
         if HAS_PYGAME:
+            self.available_backends.append("pygame")
+        if self._xinput:
+            self.available_backends.append("xinput")
+
+        if not self.available_backends:
+            self.backend = "keyboard"
+        else:
+            self.backend = self.available_backends[0]
+
+        if self.backend == "pygame" and HAS_PYGAME:
             try:
                 if self.preserve_game_ffb:
                     # Prefer the legacy/direct drivers instead of HIDAPI/XInput to avoid taking over FFB
@@ -672,6 +741,8 @@ class InputManager:
                 self._start_input_loop()
             except Exception as e:
                 print(f"[InputManager] Pygame init error: {e}")
+        elif self.backend == "xinput" and self._xinput:
+            self._start_input_loop()
 
     def set_safe_mode(self, enabled: bool):
         """
@@ -682,21 +753,48 @@ class InputManager:
         """
         self.safe_mode = enabled
         if self.safe_mode:
+            self._stop_input_loop()
             if HAS_PYGAME:
                 try:
                     pygame.quit()
                 except Exception:
                     pass
         else:
-            if HAS_PYGAME:
-                try:
-                    if not pygame.get_init():
-                        pygame.init()
-                    if not pygame.joystick.get_init():
-                        pygame.joystick.init()
-                    self._start_input_loop()
-                except Exception as e:
-                    print(f"[InputManager] Error reactivating pygame: {e}")
+            self._restart_backend()
+
+    def _restart_backend(self):
+        """Restart the configured backend if available."""
+
+        self._stop_input_loop()
+
+        if self.backend == "xinput":
+            self._xinput_last_buttons.clear()
+
+        if self.backend == "pygame" and HAS_PYGAME:
+            try:
+                if not pygame.get_init():
+                    pygame.init()
+                if not pygame.joystick.get_init():
+                    pygame.joystick.init()
+                self._start_input_loop()
+            except Exception as e:
+                print(f"[InputManager] Error reactivating pygame: {e}")
+        elif self.backend == "xinput" and self._xinput:
+            self._start_input_loop()
+
+    def set_backend(self, backend: str):
+        """Switch input backend and restart loop if needed."""
+
+        if backend not in self.available_backends:
+            print(f"[InputManager] Backend '{backend}' unavailable; keeping '{self.backend}'.")
+            return
+
+        if backend == self.backend:
+            return
+
+        self.backend = backend
+        self._xinput_last_buttons.clear()
+        self._restart_backend()
 
     def get_all_devices(self) -> List[Tuple[int, str]]:
         """
@@ -705,30 +803,41 @@ class InputManager:
         Returns:
             List of (device_id, device_name) tuples
         """
-        if self.safe_mode or not HAS_PYGAME:
+        if self.safe_mode:
             return []
 
-        try:
-            if not pygame.get_init():
-                pygame.init()
-            if not pygame.joystick.get_init():
-                pygame.joystick.init()
+        if self.backend == "xinput" and self._xinput:
             devices = []
-            count = pygame.joystick.get_count()
-
-            for i in range(count):
-                try:
-                    j = pygame.joystick.Joystick(i)
-                    if not j.get_init():
-                        j.init()
-                    devices.append((i, j.get_name()))
-                except Exception:
-                    devices.append((i, f"Device {i} (Error)"))
-                    
+            for idx in range(4):
+                state = XINPUT_STATE()
+                if self._xinput.XInputGetState(idx, ctypes.byref(state)) == 0:
+                    devices.append((idx, f"XInput Controller {idx}"))
             return devices
-        except Exception as e:
-            print(f"[InputManager] Error getting devices: {e}")
-            return []
+
+        if self.backend == "pygame" and HAS_PYGAME:
+            try:
+                if not pygame.get_init():
+                    pygame.init()
+                if not pygame.joystick.get_init():
+                    pygame.joystick.init()
+                devices = []
+                count = pygame.joystick.get_count()
+
+                for i in range(count):
+                    try:
+                        j = pygame.joystick.Joystick(i)
+                        if not j.get_init():
+                            j.init()
+                        devices.append((i, j.get_name()))
+                    except Exception:
+                        devices.append((i, f"Device {i} (Error)"))
+
+                return devices
+            except Exception as e:
+                print(f"[InputManager] Error getting devices: {e}")
+                return []
+
+        return []
 
     def connect_allowed_devices(self, allowed_names: List[str]):
         """
@@ -737,53 +846,79 @@ class InputManager:
         Args:
             allowed_names: List of device names to allow
         """
-        if self.safe_mode or not HAS_PYGAME:
+        if self.safe_mode:
             return
 
         self.joysticks.clear()
         self.allowed_devices = list(allowed_names)
 
-        try:
-            if not pygame.get_init():
-                pygame.init()
-            if not pygame.joystick.get_init():
-                pygame.joystick.init()
-
+        if self.backend == "xinput" and self._xinput:
             if not self.allowed_devices:
-                # No devices have been approved yet
-                return
+                self.allowed_devices = [name for _, name in self.get_all_devices()]
+            return
 
-            for i in range(pygame.joystick.get_count()):
-                j = pygame.joystick.Joystick(i)
-                if j.get_name() in self.allowed_devices:
-                    try:
-                        j.init()
-                        self.joysticks.append(j)
-                        print(f"[InputManager] Connected: {j.get_name()}")
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+        if self.backend == "pygame" and HAS_PYGAME:
+            try:
+                if not pygame.get_init():
+                    pygame.init()
+                if not pygame.joystick.get_init():
+                    pygame.joystick.init()
+
+                if not self.allowed_devices:
+                    # No devices have been approved yet
+                    return
+
+                for i in range(pygame.joystick.get_count()):
+                    j = pygame.joystick.Joystick(i)
+                    if j.get_name() in self.allowed_devices:
+                        try:
+                            j.init()
+                            self.joysticks.append(j)
+                            print(f"[InputManager] Connected: {j.get_name()}")
+                        except Exception:
+                            pass
+            except Exception:
+                pass
 
     def _start_input_loop(self, force: bool = False):
         """Start or restart the input loop thread with watchdog protection."""
 
-        if not HAS_PYGAME:
+        if self.safe_mode:
+            return
+
+        backend_ready = (
+            (self.backend == "pygame" and HAS_PYGAME)
+            or (self.backend == "xinput" and self._xinput)
+        )
+
+        if not backend_ready:
             return
 
         if not force and self._input_thread and self._input_thread.is_alive():
             return
 
+        self._input_stop_event = threading.Event()
         self._input_thread = threading.Thread(
             target=self._input_loop_with_watchdog, daemon=True, name="InputLoop"
         )
         self._input_thread.start()
         self._input_watchdog.start()
 
+    def _stop_input_loop(self):
+        """Stop current input loop thread if running."""
+
+        self._input_stop_event.set()
+        if self._input_thread and self._input_thread.is_alive():
+            try:
+                self._input_thread.join(timeout=1.0)
+            except Exception:
+                pass
+        self._input_thread = None
+
     def _restart_input_loop(self):
         """Attempt to restart the input loop if the watchdog detects a stall."""
 
-        if self.safe_mode or not HAS_PYGAME:
+        if self.safe_mode:
             return
 
         if self._input_thread and self._input_thread.is_alive():
@@ -794,25 +929,54 @@ class InputManager:
 
     def _input_loop_with_watchdog(self):
         """Background loop to capture joystick events and feed watchdog."""
-        while True:
+        while not self._input_stop_event.is_set():
             try:
-                if not self.safe_mode and HAS_PYGAME and pygame.get_init():
-                    pygame.event.pump()
-                    if self.active:
-                        events = pygame.event.get()
-                        for event in events:
-                            if event.type == pygame.JOYBUTTONDOWN:
-                                code = f"JOY:{event.joy}:{event.button}"
-                                if code in self.listeners:
-                                    threading.Thread(
-                                        target=self.listeners[code],
-                                        daemon=True
-                                    ).start()
+                if not self.safe_mode:
+                    if self.backend == "pygame" and HAS_PYGAME and pygame.get_init():
+                        pygame.event.pump()
+                        if self.active:
+                            events = pygame.event.get()
+                            for event in events:
+                                if event.type == pygame.JOYBUTTONDOWN:
+                                    code = f"JOY:{event.joy}:{event.button}"
+                                    if code in self.listeners:
+                                        threading.Thread(
+                                            target=self.listeners[code],
+                                            daemon=True
+                                        ).start()
+                    elif self.backend == "xinput" and self._xinput and self.active:
+                        self._poll_xinput_events()
             except Exception:
                 pass
             finally:
                 self._input_watchdog.beat()
-            time.sleep(0.01)
+            time.sleep(0.01 if self.backend == "pygame" else 0.02)
+
+    def _poll_xinput_events(self):
+        """Poll XInput controllers and dispatch button presses."""
+
+        for idx in range(4):
+            state = XINPUT_STATE()
+            if self._xinput.XInputGetState(idx, ctypes.byref(state)) != 0:
+                self._xinput_last_buttons.pop(idx, None)
+                continue
+
+            device_name = f"XInput Controller {idx}"
+            if self.allowed_devices and device_name not in self.allowed_devices:
+                continue
+
+            previous = self._xinput_last_buttons.get(idx, 0)
+            changed = state.Gamepad.wButtons & ~previous
+            if changed:
+                for btn_index, (_btn_name, mask) in enumerate(XINPUT_BUTTONS):
+                    if changed & mask:
+                        code = f"JOY:{idx}:{btn_index}"
+                        if code in self.listeners:
+                            threading.Thread(
+                                target=self.listeners[code],
+                                daemon=True
+                            ).start()
+            self._xinput_last_buttons[idx] = state.Gamepad.wButtons
 
     def capture_any_input(self, timeout: float = 10.0) -> Optional[str]:
         """
@@ -826,6 +990,7 @@ class InputManager:
         """
         captured_code = None
         start = time.time()
+        xinput_last: Dict[int, int] = {}
 
         def key_hook(e):
             nonlocal captured_code
@@ -846,21 +1011,42 @@ class InputManager:
                     break
 
                 # Check joystick buttons
-                if not self.safe_mode and HAS_PYGAME and pygame.get_init():
-                    try:
-                        pygame.event.pump()
-                        for joy in self.joysticks:
-                            try:
-                                for b_idx in range(joy.get_numbuttons()):
-                                    if joy.get_button(b_idx):
-                                        captured_code = f"JOY:{joy.get_id()}:{b_idx}"
+                if not self.safe_mode:
+                    if self.backend == "pygame" and HAS_PYGAME and pygame.get_init():
+                        try:
+                            pygame.event.pump()
+                            for joy in self.joysticks:
+                                try:
+                                    for b_idx in range(joy.get_numbuttons()):
+                                        if joy.get_button(b_idx):
+                                            captured_code = f"JOY:{joy.get_id()}:{b_idx}"
+                                            break
+                                except Exception:
+                                    pass
+                                if captured_code:
+                                    break
+                        except Exception:
+                            pass
+                    elif self.backend == "xinput" and self._xinput:
+                        for idx in range(4):
+                            state = XINPUT_STATE()
+                            if self._xinput.XInputGetState(idx, ctypes.byref(state)) != 0:
+                                xinput_last.pop(idx, None)
+                                continue
+
+                            device_name = f"XInput Controller {idx}"
+                            if self.allowed_devices and device_name not in self.allowed_devices:
+                                continue
+
+                            changed = state.Gamepad.wButtons & ~xinput_last.get(idx, 0)
+                            if changed:
+                                for b_idx, (_btn_name, mask) in enumerate(XINPUT_BUTTONS):
+                                    if changed & mask:
+                                        captured_code = f"JOY:{idx}:{b_idx}"
                                         break
-                            except Exception:
-                                pass
+                            xinput_last[idx] = state.Gamepad.wButtons
                             if captured_code:
                                 break
-                    except Exception:
-                        pass
 
                 if captured_code:
                     break
@@ -3160,6 +3346,7 @@ class iRacingControlApp:
 
         # Settings
         self.use_keyboard_only = tk.BooleanVar(value=False)
+        self.input_backend = tk.StringVar(value=input_manager.backend)
         self.use_tts = tk.BooleanVar(value=False)
         self.use_voice = tk.BooleanVar(value=False)
         self.voice_engine = tk.StringVar(value="speech")
@@ -3195,6 +3382,11 @@ class iRacingControlApp:
 
         # Load configuration
         self.load_config()
+
+        if self.input_backend.get() in input_manager.available_backends:
+            input_manager.set_backend(self.input_backend.get())
+        else:
+            self.input_backend.set(input_manager.backend)
 
         # Create UI
         self._create_menu()
@@ -3369,6 +3561,39 @@ class iRacingControlApp:
             text="Voice/Audio Options",
             command=self.open_voice_audio_settings
         ).pack(side="right")
+
+        backend_frame = tk.Frame(self.root)
+        backend_frame.pack(fill="x", padx=10, pady=(0, 5))
+
+        tk.Label(
+            backend_frame,
+            text="Input backend:",
+            font=("Arial", 10, "bold")
+        ).pack(side="left")
+
+        backend_labels = [self._backend_label(b) for b in input_manager.available_backends]
+        if not backend_labels:
+            backend_labels = [self._backend_label(self.input_backend.get()) or "Keyboard Only"]
+
+        self.backend_combo = ttk.Combobox(
+            backend_frame,
+            state="readonly",
+            width=34,
+            values=backend_labels
+        )
+        selected_label = self._backend_label(self.input_backend.get())
+        if selected_label not in backend_labels:
+            selected_label = backend_labels[0]
+        self.backend_combo.set(selected_label)
+        self.backend_combo.bind("<<ComboboxSelected>>", self.on_backend_changed)
+        self.backend_combo.pack(side="left", padx=8)
+
+        tk.Label(
+            backend_frame,
+            text="(XInput avoids taking force feedback handles)",
+            fg="gray",
+            font=("Arial", 8)
+        ).pack(side="left")
 
         # Auto-detect
         auto_frame = tk.Frame(self.root)
@@ -3817,6 +4042,28 @@ class iRacingControlApp:
         self.root.focus_force()
 
     # Safe mode and device management
+    def _backend_label(self, key: str) -> str:
+        mapping = {
+            "pygame": "SDL/Pygame (legacy)",
+            "xinput": "XInput (non-exclusive)"
+        }
+        return mapping.get(key, key.title())
+
+    def on_backend_changed(self, _event=None):
+        """Handle user selection of input backend."""
+
+        selected = self.backend_combo.get() if hasattr(self, "backend_combo") else ""
+        reverse = {self._backend_label(k): k for k in input_manager.available_backends}
+        backend = reverse.get(selected)
+
+        if not backend:
+            return
+
+        self.input_backend.set(backend)
+        input_manager.set_backend(backend)
+        input_manager.connect_allowed_devices(input_manager.allowed_devices)
+        self.save_config()
+
     def update_safe_mode(self):
         """Update safe mode settings."""
         input_manager.set_safe_mode(self.use_keyboard_only.get())
@@ -4653,6 +4900,7 @@ class iRacingControlApp:
             "global_timing": GLOBAL_TIMING,
             "hud_style": self.overlay.style_cfg,
             "use_keyboard_only": self.use_keyboard_only.get(),
+            "input_backend": self.input_backend.get(),
             "use_tts": self.use_tts.get(),
             "use_voice": self.use_voice.get(),
             "voice_engine": self.voice_engine.get(),
@@ -4699,6 +4947,12 @@ class iRacingControlApp:
             self.overlay.apply_style(self.overlay.style_cfg)
 
         self.use_keyboard_only.set(data.get("use_keyboard_only", False))
+        backend = data.get("input_backend", input_manager.backend)
+        if backend in input_manager.available_backends:
+            self.input_backend.set(backend)
+            input_manager.set_backend(backend)
+        else:
+            self.input_backend.set(input_manager.backend)
         self.use_tts.set(data.get("use_tts", False))
         self.use_voice.set(data.get("use_voice", False))
         self.voice_engine.set(data.get("voice_engine", "speech"))

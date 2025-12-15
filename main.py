@@ -95,6 +95,12 @@ TTS_STATE = {
     "cooldown_s": 1.2
 }
 
+# Shared TTS resources (initialized lazily to avoid startup overhead)
+_TTS_ENGINE = None
+_TTS_THREAD: Optional[threading.Thread] = None
+_TTS_QUEUE: "queue.Queue[str]" = queue.Queue()
+_TTS_LOCK = threading.Lock()
+
 # Initialize config file if it doesn't exist
 if not os.path.exists(CONFIG_FILE):
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -360,33 +366,108 @@ def _direct_pulse(scan_code: Optional[int], press_ms: int, interval_ms: int):
         print(f"[_direct_pulse] Error: {e}")
 
 
-def speak_text(text: str):
-    """
-    Speak text using TTS with cooldown to prevent spam.
-    
-    Args:
-        text: The text to speak
-    """
+def _select_english_voice(engine) -> Optional[str]:
+    """Pick the best available English voice from the host engine."""
+
+    try:
+        voices = engine.getProperty("voices") or []
+    except Exception:
+        return None
+
+    preferred: Optional[str] = None
+    fallback: Optional[str] = None
+
+    for voice in voices:
+        name = str(getattr(voice, "name", "")).lower()
+        vid = str(getattr(voice, "id", "")).lower()
+        languages = [str(lang).lower() for lang in getattr(voice, "languages", [])]
+
+        is_english = (
+            "english" in name
+            or "en" in vid
+            or any("en" in lang for lang in languages)
+        )
+
+        if not is_english:
+            continue
+
+        if any(key in vid or key in name for key in ["en-us", "enus", "united states"]):
+            return getattr(voice, "id", None)
+
+        if fallback is None:
+            fallback = getattr(voice, "id", None)
+
+    return preferred or fallback
+
+
+def _ensure_tts_engine():
+    """Initialize and cache the shared TTS engine."""
+    global _TTS_ENGINE, _TTS_THREAD
+
     if not HAS_TTS:
+        return None
+
+    with _TTS_LOCK:
+        if _TTS_ENGINE is None:
+            try:
+                engine = pyttsx3.init()
+                voice_id = _select_english_voice(engine)
+                if voice_id:
+                    engine.setProperty("voice", voice_id)
+                engine.setProperty("rate", 185)
+                _TTS_ENGINE = engine
+            except Exception as exc:  # noqa: PERF203
+                print(f"[TTS] Failed to initialize engine: {exc}")
+                _TTS_ENGINE = None
+
+        if _TTS_THREAD is None or not _TTS_THREAD.is_alive():
+            _TTS_THREAD = threading.Thread(target=_tts_worker, daemon=True)
+            _TTS_THREAD.start()
+
+    return _TTS_ENGINE
+
+
+def _tts_worker():
+    """Background worker to serialize speech requests and reduce latency."""
+    while True:
+        text = _TTS_QUEUE.get()
+        if text is None:
+            return
+
+        engine = _ensure_tts_engine()
+        if not engine:
+            _TTS_QUEUE.task_done()
+            continue
+
+        try:
+            engine.say(text)
+            engine.runAndWait()
+        except Exception as exc:  # noqa: PERF203
+            print(f"[TTS] Playback failed: {exc}")
+        finally:
+            _TTS_QUEUE.task_done()
+
+
+def speak_text(text: str):
+    """Speak text using TTS with cooldown to prevent spam and reduce startup cost."""
+
+    if not HAS_TTS or not text:
         return
-        
+
     now = time.time()
     if text == TTS_STATE["last_text"] and (now - TTS_STATE["last_time"] < TTS_STATE["cooldown_s"]):
         return
-        
+
     TTS_STATE["last_text"] = text
     TTS_STATE["last_time"] = now
 
-    def _speak():
-        try:
-            engine = pyttsx3.init()
-            engine.setProperty('rate', 180)
-            engine.say(text)
-            engine.runAndWait()
-        except Exception:
-            pass
+    if not _ensure_tts_engine():
+        return
 
-    threading.Thread(target=_speak, daemon=True).start()
+    try:
+        _TTS_QUEUE.put_nowait(text)
+    except Exception:
+        pass
 
 
 # ======================================================================

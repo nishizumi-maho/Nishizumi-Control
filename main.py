@@ -61,20 +61,18 @@ from dominant_control.dependencies import (
 )
 from dominant_control.input_engine import (
     IS_WINDOWS,
-    _compute_timing,
-    _direct_pulse,
     _normalize_timing_config,
-    click_pulse,
-    press_key,
-    release_key,
 )
 from dominant_control.ui import ComboTab, ControlTab, ScrollableFrame
 from dominant_control.input_manager import input_manager
-from dominant_control.ui import GlobalTimingWindow
 from dominant_control.tts import speak_text
-from dominant_control.ui import DeviceSelector, OverlayWindow
-from dominant_control.voice import VoiceTestDialog, voice_listener
+from dominant_control.ui.combo_tab import ComboTab
+from dominant_control.ui.control_tab import ControlTab
+from dominant_control.ui.device_selector import DeviceSelector
 from dominant_control.ui.overlay_config import OverlayConfigTab, ScrollableFrame
+from dominant_control.ui.overlay_window import OverlayWindow
+from dominant_control.ui.timing_window import GlobalTimingWindow
+from dominant_control.voice import VoiceTestDialog, voice_listener
 
 
 

@@ -93,6 +93,17 @@ os.makedirs(CONFIG_FOLDER, exist_ok=True)
 CONFIG_FILE = os.path.join(CONFIG_FOLDER, "config_v3.json")
 PENDING_SCAN_FILE = os.path.join(CONFIG_FOLDER, "pending_scan.flag")
 
+# Overlay feedback defaults (per-car thresholds)
+DEFAULT_OVERLAY_FEEDBACK = {
+    "abs_hold_s": 0.35,
+    "tc_hold_s": 0.35,
+    "wheelspin_slip": 0.18,
+    "wheelspin_hold_s": 0.25,
+    "lockup_slip": 0.2,
+    "lockup_hold_s": 0.25,
+    "cooldown_s": 6.0
+}
+
 # Timing profiles for input simulation (click-click timing)
 GLOBAL_TIMING = {
     "profile": "aggressive",  # "aggressive", "casual", "relaxed", "custom", "bot"
@@ -1627,6 +1638,44 @@ class OverlayConfigTab(tk.Frame):
         for i in range(2):
             appearance_frame.columnconfigure(i, weight=1)
 
+        feedback_frame = tk.LabelFrame(
+            self.body, text="Assist Feedback Thresholds (per car)"
+        )
+        feedback_frame.pack(fill="x", padx=5, pady=5)
+
+        self.feedback_vars = {
+            "abs_hold_s": tk.DoubleVar(value=DEFAULT_OVERLAY_FEEDBACK["abs_hold_s"]),
+            "tc_hold_s": tk.DoubleVar(value=DEFAULT_OVERLAY_FEEDBACK["tc_hold_s"]),
+            "wheelspin_slip": tk.DoubleVar(
+                value=DEFAULT_OVERLAY_FEEDBACK["wheelspin_slip"]
+            ),
+            "wheelspin_hold_s": tk.DoubleVar(
+                value=DEFAULT_OVERLAY_FEEDBACK["wheelspin_hold_s"]
+            ),
+            "lockup_slip": tk.DoubleVar(value=DEFAULT_OVERLAY_FEEDBACK["lockup_slip"]),
+            "lockup_hold_s": tk.DoubleVar(value=DEFAULT_OVERLAY_FEEDBACK["lockup_hold_s"]),
+            "cooldown_s": tk.DoubleVar(value=DEFAULT_OVERLAY_FEEDBACK["cooldown_s"]),
+        }
+
+        feedback_rows = [
+            ("ABS ativo por mais de (s)", "abs_hold_s"),
+            ("TC ativo por mais de (s)", "tc_hold_s"),
+            ("Slip de wheelspin (ratio)", "wheelspin_slip"),
+            ("Duração do wheelspin (s)", "wheelspin_hold_s"),
+            ("Slip de travamento (valor negativo)", "lockup_slip"),
+            ("Duração do travamento (s)", "lockup_hold_s"),
+            ("Cooldown entre alertas (s)", "cooldown_s"),
+        ]
+
+        for idx, (label, key) in enumerate(feedback_rows):
+            tk.Label(feedback_frame, text=label).grid(
+                row=idx, column=0, padx=5, pady=2, sticky="w"
+            )
+            entry = tk.Entry(feedback_frame, width=10, textvariable=self.feedback_vars[key])
+            entry.grid(row=idx, column=1, padx=5, pady=2, sticky="w")
+            entry.bind("<FocusOut>", self._on_feedback_change)
+            entry.bind("<KeyRelease>", self._on_feedback_change)
+
         tk.Button(
             appearance_frame,
             text="Apply Style",
@@ -1702,6 +1751,8 @@ class OverlayConfigTab(tk.Frame):
             var_list: List of (var_name, is_float) tuples
             overlay_config: Dict of var_name -> {"show": bool, "label": str}
         """
+        self._load_feedback_for_car(car_name)
+
         # Rebuild variable rows
         for child in self.variables_list_frame.winfo_children():
             child.destroy()
@@ -1752,8 +1803,16 @@ class OverlayConfigTab(tk.Frame):
             )
 
         self.app.car_overlay_config[car_name] = overlay_config
+        self._collect_feedback_for_car(car_name)
         self.app.overlay.rebuild_monitor(overlay_config)
         self.app.save_config()
+
+    def _on_feedback_change(self, *_args):
+        """Persist feedback edits and save lazily."""
+
+        car = self.app.current_car or "Generic Car"
+        self._collect_feedback_for_car(car)
+        self.app.schedule_save()
 
     def _on_overlay_row_change(self, var_name: str):
         """Apply live updates when overlay rows change."""
@@ -1788,8 +1847,34 @@ class OverlayConfigTab(tk.Frame):
             config[var_name] = {"show": show, "label": label}
 
         self.app.car_overlay_config[car_name] = config
+        self._collect_feedback_for_car(car_name)
         self.app.overlay.rebuild_monitor(config)
         return config
+
+    def _load_feedback_for_car(self, car_name: str) -> None:
+        """Load per-car feedback thresholds into the UI fields."""
+
+        cfg = DEFAULT_OVERLAY_FEEDBACK.copy()
+        cfg.update(self.app.car_overlay_feedback.get(car_name, {}))
+
+        for key, var in self.feedback_vars.items():
+            try:
+                var.set(float(cfg.get(key, DEFAULT_OVERLAY_FEEDBACK[key])))
+            except Exception:
+                var.set(DEFAULT_OVERLAY_FEEDBACK[key])
+
+    def _collect_feedback_for_car(self, car_name: str) -> Dict[str, float]:
+        """Persist feedback thresholds from UI fields for a car."""
+
+        cfg: Dict[str, float] = DEFAULT_OVERLAY_FEEDBACK.copy()
+        for key, var in self.feedback_vars.items():
+            try:
+                cfg[key] = float(var.get())
+            except Exception:
+                cfg[key] = DEFAULT_OVERLAY_FEEDBACK[key]
+
+        self.app.car_overlay_feedback[car_name] = cfg
+        return cfg
 
 
 # ======================================================================
@@ -2895,6 +2980,17 @@ class iRacingControlApp:
         
         # Overlay config per car
         self.car_overlay_config: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        self.car_overlay_feedback: Dict[str, Dict[str, float]] = {}
+
+        self._overlay_feedback_state = {
+            "last_time": time.time(),
+            "abs_active": 0.0,
+            "tc_active": 0.0,
+            "spin_active": 0.0,
+            "lock_active": 0.0,
+            "last_alert": "",
+            "last_alert_time": 0.0
+        }
 
         # Active variables for current car
         self.active_vars: List[Tuple[str, bool]] = []
@@ -3631,8 +3727,8 @@ class iRacingControlApp:
         car = self.combo_car.get()
         if car in self.saved_presets:
             tracks = sorted([
-                t for t in self.saved_presets[car].keys() 
-                if t != "_overlay"
+                t for t in self.saved_presets[car].keys()
+                if t not in {"_overlay", "_overlay_feedback"}
             ])
             self.combo_track["values"] = tracks
         else:
@@ -3661,6 +3757,9 @@ class iRacingControlApp:
         # Collect overlay config
         self.overlay_tab.collect_for_car(car)
 
+        if car not in self.car_overlay_feedback:
+            self.car_overlay_feedback[car] = DEFAULT_OVERLAY_FEEDBACK.copy()
+
         # Collect tab configs
         current_data = {
             "active_vars": self.active_vars,
@@ -3680,6 +3779,8 @@ class iRacingControlApp:
         if car not in self.car_overlay_config:
             self.car_overlay_config[car] = {}
         self.saved_presets[car]["_overlay"] = self.car_overlay_config[car]
+        self.saved_presets[car]["_overlay_feedback"] = \
+            self.car_overlay_feedback.get(car, DEFAULT_OVERLAY_FEEDBACK.copy())
 
         self.save_config()
         # Allow auto-detection to load this preset the next time we see the pair
@@ -3716,6 +3817,11 @@ class iRacingControlApp:
         # Load overlay config
         overlay_config = self.saved_presets[car].get("_overlay", {})
         self.car_overlay_config[car] = overlay_config
+        self.car_overlay_feedback[car] = self.saved_presets[car].get(
+            "_overlay_feedback", self.car_overlay_feedback.get(
+                car, DEFAULT_OVERLAY_FEEDBACK.copy()
+            )
+        )
         self.overlay_tab.load_for_car(car, self.active_vars, overlay_config)
 
         self.register_current_listeners()
@@ -3752,12 +3858,14 @@ class iRacingControlApp:
 
             # Remove car if no more tracks
             if not [
-                t for t in self.saved_presets[car].keys() 
-                if t != "_overlay"
+                t for t in self.saved_presets[car].keys()
+                if t not in {"_overlay", "_overlay_feedback"}
             ]:
                 del self.saved_presets[car]
                 if car in self.car_overlay_config:
                     del self.car_overlay_config[car]
+                if car in self.car_overlay_feedback:
+                    del self.car_overlay_feedback[car]
 
             self.save_config()
             self.update_preset_ui()
@@ -3828,6 +3936,12 @@ class iRacingControlApp:
                 if "_overlay" not in self.saved_presets[car_clean]:
                     self.saved_presets[car_clean]["_overlay"] = \
                         self.car_overlay_config.get(car_clean, {})
+
+                if "_overlay_feedback" not in self.saved_presets[car_clean]:
+                    self.saved_presets[car_clean]["_overlay_feedback"] = \
+                        self.car_overlay_feedback.get(
+                            car_clean, DEFAULT_OVERLAY_FEEDBACK.copy()
+                        )
 
                 if track_clean not in self.saved_presets[car_clean]:
                     self.saved_presets[car_clean][track_clean] = {
@@ -4047,7 +4161,14 @@ class iRacingControlApp:
             self.saved_presets[car]["_overlay"] = \
                 self.car_overlay_config.get(car, {})
 
+        if "_overlay_feedback" not in self.saved_presets[car]:
+            self.saved_presets[car]["_overlay_feedback"] = \
+                self.car_overlay_feedback.get(
+                    car, DEFAULT_OVERLAY_FEEDBACK.copy()
+                )
+
         self.car_overlay_config[car] = self.saved_presets[car]["_overlay"]
+        self.car_overlay_feedback[car] = self.saved_presets[car]["_overlay_feedback"]
         self.overlay_tab.load_for_car(
             car,
             self.active_vars,
@@ -4136,11 +4257,17 @@ class iRacingControlApp:
         if "_overlay" not in self.saved_presets[car]:
             self.saved_presets[car]["_overlay"] = \
                 self.car_overlay_config.get(car, {})
+        if "_overlay_feedback" not in self.saved_presets[car]:
+            self.saved_presets[car]["_overlay_feedback"] = \
+                self.car_overlay_feedback.get(
+                    car, DEFAULT_OVERLAY_FEEDBACK.copy()
+                )
 
         self.car_overlay_config[car] = self.saved_presets[car]["_overlay"]
+        self.car_overlay_feedback[car] = self.saved_presets[car]["_overlay_feedback"]
         self.overlay_tab.load_for_car(
-            car, 
-            self.active_vars, 
+            car,
+            self.active_vars,
             self.car_overlay_config[car]
         )
 
@@ -4187,7 +4314,163 @@ class iRacingControlApp:
 
             self.overlay.update_monitor_values(data)
 
+        self._update_overlay_feedback()
+
         self.root.after(100, self.update_overlay_loop)
+
+    def _read_ir_value(self, key: str):
+        """Safely read a telemetry key from the iRacing SDK."""
+
+        try:
+            if not getattr(self.ir, "is_initialized", False):
+                self.ir.startup()
+            return self.ir[key]
+        except Exception:
+            return None
+
+    @staticmethod
+    def _safe_float(value: Any, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except Exception:
+            return default
+
+    def _bool_from_keys(self, keys: List[str]) -> bool:
+        """Return True if any telemetry key resolves to a truthy value."""
+
+        for key in keys:
+            value = self._read_ir_value(key)
+
+            if isinstance(value, (list, tuple)):
+                if any(bool(v) for v in value):
+                    return True
+            elif isinstance(value, numbers.Real):
+                if float(value) != 0.0:
+                    return True
+            elif isinstance(value, bool) and value:
+                return True
+
+        return False
+
+    def _slip_values(self) -> List[float]:
+        """Aggregate slip ratios from available telemetry fields."""
+
+        slips: List[float] = []
+        for key in ["WheelSlip", "WheelSlipPct", "WheelSlipRatio", "TireSlip"]:
+            value = self._read_ir_value(key)
+            if isinstance(value, (list, tuple)):
+                slips.extend([self._safe_float(v, 0.0) for v in value])
+
+        return slips
+
+    def _push_overlay_alert(
+        self, message: str, color: str, cfg: Dict[str, float], now: float
+    ) -> None:
+        """Send rate-limited feedback to the overlay status area."""
+
+        state = self._overlay_feedback_state
+        cooldown = max(0.5, float(cfg.get("cooldown_s", 6.0)))
+
+        if (
+            now - state.get("last_alert_time", 0.0) < cooldown
+            and state.get("last_alert") == message
+        ):
+            return
+
+        self.notify_overlay_status(message, color)
+        state["last_alert"] = message
+        state["last_alert_time"] = now
+
+    def _update_overlay_feedback(self):
+        """Analyze telemetry and surface ABS/TC/wheelspin hints on the HUD."""
+
+        car = self.current_car or "Generic Car"
+        cfg = DEFAULT_OVERLAY_FEEDBACK.copy()
+        cfg.update(self.car_overlay_feedback.get(car, {}))
+
+        state = self._overlay_feedback_state
+        now = time.time()
+        dt = max(0.0, now - state.get("last_time", now))
+        state["last_time"] = now
+
+        throttle = self._safe_float(self._read_ir_value("Throttle"), 0.0)
+        brake = self._safe_float(self._read_ir_value("Brake"), 0.0)
+
+        abs_active = self._bool_from_keys([
+            "BrakeABSactive",
+            "BrakeABSActive",
+            "BrakeABSActiveLF",
+            "BrakeABSActiveRF",
+            "BrakeABSActiveLR",
+            "BrakeABSActiveRR",
+        ])
+        tc_active = self._bool_from_keys([
+            "TractionControlActive",
+            "TractionControlEngaged",
+            "TCActive",
+            "TractionControlOn",
+        ])
+
+        slips = self._slip_values()
+        max_slip = max(slips) if slips else 0.0
+        min_slip = min(slips) if slips else 0.0
+
+        if abs_active and brake > 0.05:
+            state["abs_active"] += dt
+        else:
+            state["abs_active"] = 0.0
+
+        if tc_active and throttle > 0.2:
+            state["tc_active"] += dt
+        else:
+            state["tc_active"] = 0.0
+
+        if throttle > 0.2 and max_slip >= cfg["wheelspin_slip"]:
+            state["spin_active"] += dt
+        else:
+            state["spin_active"] = 0.0
+
+        lock_threshold = -abs(cfg["lockup_slip"])
+        if brake > 0.05 and slips and min_slip <= lock_threshold:
+            state["lock_active"] += dt
+        else:
+            state["lock_active"] = 0.0
+
+        if state["abs_active"] >= cfg["abs_hold_s"]:
+            self._push_overlay_alert(
+                "ABS ativo demais: tente aliviar freio ou reduzir ABS.",
+                "orange",
+                cfg,
+                now
+            )
+            state["abs_active"] = 0.0
+
+        if state["tc_active"] >= cfg["tc_hold_s"]:
+            self._push_overlay_alert(
+                "TC acionando constantemente: considere baixar TC ou mapa.",
+                "orange",
+                cfg,
+                now
+            )
+            state["tc_active"] = 0.0
+
+        if state["spin_active"] >= cfg["wheelspin_hold_s"]:
+            self._push_overlay_alert(
+                "Wheelspin detectado: suba TC ou module o acelerador.",
+                "orange",
+                cfg,
+                now
+            )
+            state["spin_active"] = 0.0
+
+        if state["lock_active"] >= cfg["lockup_hold_s"]:
+            self._push_overlay_alert(
+                "Travamento detectado: aumente ABS ou alivie a pressão.",
+                "orange",
+                cfg,
+                now
+            )
+            state["lock_active"] = 0.0
 
     def open_timing_window(self):
         """Open timing configuration window."""
@@ -4238,6 +4521,7 @@ class iRacingControlApp:
             "allowed_devices": input_manager.allowed_devices,
             "saved_presets": self.saved_presets,
             "car_overlay_config": self.car_overlay_config,
+            "car_overlay_feedback": self.car_overlay_feedback,
             "active_vars": self.active_vars,
             "current_car": self.current_car,
             "current_track": self.current_track
@@ -4287,6 +4571,9 @@ class iRacingControlApp:
 
         self.saved_presets = data.get("saved_presets", {})
         self.car_overlay_config = data.get("car_overlay_config", {})
+        self.car_overlay_feedback = data.get(
+            "car_overlay_feedback", self.car_overlay_feedback
+        )
         self.active_vars = data.get("active_vars", [])
         self.current_car = data.get("current_car", "")
         self.current_track = data.get("current_track", "")

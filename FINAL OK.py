@@ -109,6 +109,20 @@ warnings.filterwarnings(
 def _prepare_vosk_env() -> Optional[str]:
     """Ensure Vosk DLLs are discoverable when running a bundled executable."""
 
+    def _contains_vosk_binaries(path: str) -> bool:
+        """Return True if the directory holds plausible Vosk binaries."""
+
+        if not os.path.isdir(path):
+            return False
+
+        expected_names = {"vosk.dll", "libvosk.dll", "libvosk.so", "libvosk.dylib"}
+        for name in os.listdir(path):
+            lower_name = name.lower()
+            if lower_name in expected_names or lower_name.startswith("libvosk"):
+                return True
+
+        return False
+
     candidates = []
 
     # Explicit overrides take precedence
@@ -134,7 +148,11 @@ def _prepare_vosk_env() -> Optional[str]:
 
     selected: Optional[str] = None
     for path in candidates:
-        if not path or not os.path.isdir(path):
+        if not path:
+            continue
+
+        # Only use the path if it looks like it actually contains the DLLs.
+        if not _contains_vosk_binaries(path):
             continue
 
         selected = path

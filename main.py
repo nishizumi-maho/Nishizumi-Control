@@ -14,7 +14,6 @@ All Rights Reserved
 Version: 1.0.0
 """
 
-import json
 import numbers
 import os
 import queue
@@ -33,7 +32,6 @@ from dominant_control.config import (
     APP_FOLDER,
     APP_NAME,
     APP_VERSION,
-    CONFIG_FILE,
     CONFIG_FOLDER,
     DEFAULT_OVERLAY_FEEDBACK,
     GLOBAL_TIMING,
@@ -47,6 +45,7 @@ from dominant_control.config import (
     resolve_resource_path,
     restart_program,
 )
+from dominant_control.config_service import ConfigService
 from dominant_control.controllers import GenericController
 from dominant_control.controllers.device_allowlist import DeviceAllowlistManager
 from dominant_control.controllers.lifecycle import LifecycleManager
@@ -189,6 +188,7 @@ class iRacingControlApp:
         self.device_manager = DeviceAllowlistManager(self)
         self.lifecycle_manager = LifecycleManager(self)
         self.voice_control = VoiceControlManager(self)
+        self.config_service = ConfigService(self)
 
         # Load configuration
         self.load_config()
@@ -1443,88 +1443,11 @@ class iRacingControlApp:
 
     def save_config(self):
         """Save configuration to disk."""
-        # Collect overlay config
-        car = self.current_car or "Generic Car"
-        if self.overlay_tab:
-            self.overlay_tab.collect_for_car(car)
-
-        data = {
-            "global_timing": GLOBAL_TIMING,
-            "hud_style": self.overlay.style_cfg,
-            "show_overlay_feedback": self.show_overlay_feedback.get(),
-            "use_keyboard_only": self.use_keyboard_only.get(),
-            "use_tts": self.use_tts.get(),
-            "use_voice": self.use_voice.get(),
-            "voice_engine": self.voice_engine.get(),
-            "vosk_model_path": self.vosk_model_path.get(),
-            "voice_tuning": self._voice_tuning_config(),
-            "microphone_device": self.microphone_device.get(),
-            "audio_output_device": self.audio_output_device.get(),
-            "auto_detect": self.auto_detect.get(),
-            "auto_restart_on_rescan": self.auto_restart_on_rescan.get(),
-            "auto_restart_on_race": self.auto_restart_on_race.get(),
-            "pending_scan_on_start": self.pending_scan_on_start,
-            "allowed_devices": input_manager.allowed_devices,
-            "saved_presets": self.saved_presets,
-            "car_overlay_config": self.car_overlay_config,
-            "car_overlay_feedback": self.car_overlay_feedback,
-            "active_vars": self.active_vars,
-            "current_car": self.current_car,
-            "current_track": self.current_track
-        }
-
-        try:
-            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=4)
-        except Exception as e:
-            print(f"[SAVE] Error saving config: {e}")
+        self.config_service.save()
 
     def load_config(self):
         """Load configuration from disk."""
-        global GLOBAL_TIMING
-        
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            return
-
-        GLOBAL_TIMING = _normalize_timing_config(
-            data.get("global_timing", GLOBAL_TIMING)
-        )
-
-        style = data.get("hud_style")
-        if style:
-            self.overlay.style_cfg.update(style)
-            self.overlay.apply_style(self.overlay.style_cfg)
-
-        self.show_overlay_feedback.set(data.get("show_overlay_feedback", True))
-
-        self.use_keyboard_only.set(data.get("use_keyboard_only", False))
-        self.use_tts.set(data.get("use_tts", False))
-        self.use_voice.set(data.get("use_voice", False))
-        self.voice_engine.set(data.get("voice_engine", "speech"))
-        self.vosk_model_path.set(data.get("vosk_model_path", ""))
-        self.microphone_device.set(data.get("microphone_device", -1))
-        self.audio_output_device.set(data.get("audio_output_device", -1))
-        self._set_voice_tuning_vars(
-            data.get("voice_tuning", VOICE_TUNING_DEFAULTS)
-        )
-        self.auto_detect.set(data.get("auto_detect", True))
-        self.auto_restart_on_rescan.set(data.get("auto_restart_on_rescan", True))
-        self.auto_restart_on_race.set(data.get("auto_restart_on_race", True))
-        self.pending_scan_on_start = data.get("pending_scan_on_start", False)
-
-        input_manager.allowed_devices = data.get("allowed_devices", [])
-
-        self.saved_presets = data.get("saved_presets", {})
-        self.car_overlay_config = data.get("car_overlay_config", {})
-        self.car_overlay_feedback = data.get(
-            "car_overlay_feedback", self.car_overlay_feedback
-        )
-        self.active_vars = data.get("active_vars", [])
-        self.current_car = data.get("current_car", "")
-        self.current_track = data.get("current_track", "")
+        self.config_service.load()
 
     def _set_voice_tuning_vars(self, tuning: Dict[str, Any]):
         self.voice_control.set_voice_tuning_vars(tuning)

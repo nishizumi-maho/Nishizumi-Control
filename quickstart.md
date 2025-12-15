@@ -1,221 +1,67 @@
-# Quick Start Guide
+# Quick Start Guide (v3.0.0)
 
-Get up and running in 5 minutes with Dominant Control for iRacing.
+Get running in minutes with Dominant Control.
 
-## ⚠️ Important First
+## Before You Begin
+- Windows 10/11 (64-bit)
+- iRacing installed and an active subscription
+- (Source install) Python 3.10+ with dependencies from `requirements.txt`
+- Start the app **before** iRacing if you use controllers; or use **Keyboard Only Mode**.
 
-This tool is for:
-- ✅ Accessibility assistance (physical limitations)
-- ✅ Equipment without certain features
-- ✅ Educational purposes
-- ✅ Private testing sessions only
+## 1) Install & Launch
+### Windows Build
+1. Download the latest release ZIP and extract it (e.g., `C:\DominantControl\`).
+2. Run `DominantControl.exe`.
 
-Use responsibly. You are responsible for compliance.
+### From Source
+1. `python -m pip install -r requirements.txt`
+2. `python main.py`
 
----
+## 2) Connect to iRacing
+1. Start iRacing and enter a **private practice session**.
+2. Click **Drive** so telemetry is active.
+3. Keep Dominant Control open in the foreground or on a second monitor.
 
-## Step 1: Download & Extract (30 seconds)
+## 3) Scan & Configure
+1. In the app, switch to **CONFIG** mode (button in the title bar).
+2. Click **🔍 Scan Driver Controls** to populate tabs (BrakeBias, TC, ABS, ARB, etc.).
+3. For each tab:
+   - Click **Set Increase (+)** and press your desired key/button.
+   - Click **Set Decrease (-)** and press your desired key/button.
+   - Add up to four **Presets** by typing a value and binding a key/button.
+   - Toggle HUD visibility for that variable if desired.
 
-1. Download `DominantControl_v1.0.0.zip` from Releases
-2. Extract to `C:\DominantControl\`
-3. Done!
+## 4) HUD / Overlay Setup
+1. Open the **HUD / Overlay** tab.
+2. Check the variables you want visible.
+3. Adjust font size, colors, and opacity; drag the overlay into place.
+4. Click **Apply Style** to save per-car settings.
 
----
+## 5) Combos & Timing
+- **⚡ Combos Tab:** create macros that set multiple controls at once (e.g., “Rain” or “Pit Exit”). Bind to a single key/button.
+- **Timing Profiles:** pick Aggressive / Casual / Relaxed or create a **Custom** profile if adjustments fire too slowly/quickly.
 
-## Step 2: First Run - IMPORTANT ORDER! (30 seconds)
+## 6) Voice & Audio Feedback
+- **Text-to-Speech:** enable in settings for spoken confirmations; choose an output device if PyAudio is available.
+- **Vosk Voice Commands:**
+  1. Download a Vosk English model and note its folder path.
+  2. Set the **Vosk model path** in settings and enable **Voice Commands**.
+  3. Test phrases like “Brake bias up” or “Traction control preset two.”
+  4. Use a push-to-talk key if your room is noisy.
 
-**⚠️ To avoid force feedback issues, follow this order:**
+## 7) Save & Run
+1. Enter car and track names, then click **Save Current**.
+2. Switch back to **RUNNING** mode.
+3. Test in the practice session: bindings, presets, combos, HUD, and voice commands.
 
-1. **FIRST**: Run `DominantControl.exe`
-2. Windows warning? Click "More info" → "Run anyway"
-3. **THEN**: Start iRacing
+## 8) Maintenance
+- Profiles live in `%APPDATA%\DominantControl\configs\`; back them up before reinstalling.
+- After updates, re-verify bindings, HUD layout, timing profile, and Vosk model path.
 
-**Why?** Due to how input devices are initialized, opening the app after iRacing can cause force feedback loss. Opening the app first prevents this.
-
-**Alternative:** Use "Keyboard Only Mode" (in settings) to completely avoid this issue.
-
----
-
-## Step 3: Connect to iRacing (1 minute)
-
-1. **Start iRacing**
-2. **Enter a PRIVATE practice session**
-3. **Get in the car** (Drive mode)
-4. **Leave application running**
-
----
-
-## Step 4: Configure (2 minutes)
-
-### Enter CONFIG Mode
-- Click the **"Mode: RUNNING"** button at the top
-- It changes to **"Mode: CONFIG"** (orange)
-
-### Scan Controls
-- Click **"🔍 SCAN DRIVER CONTROLS"**
-- Wait a few seconds
-- Tabs appear for detected controls
-
-### Set Up One Control (Example: Brake Bias)
-
-1. Click the **"BrakeBias"** tab
-2. Click **"Set Increase (+)"** (use the same key that INCREASE this value in iRacing)
-3. Press a key you want (e.g., Numpad 8)
-4. Click **"Set Decrease (-)"** (use the same key that DECREASE this value in iRacing)
-5. Press another key (e.g., Numpad 2)
-
-### Create a Quick Preset (Optional)
-
-1. In the same tab, find the "Presets" section
-2. In the first "Macro" row, enter a value (e.g., "52.5")
-3. Click "Set Bind"
-4. Press a button (e.g., Numpad 5)
-
-Done! You now have brake bias controls.
-
----
-
-## Step 5: Save & Test (1 minute)
-
-### Save Configuration
-1. Enter car name in "Car" field (e.g., "BMW M4 GT3")
-2. Enter track name in "Track" field (e.g., "Watkins Glen")
-3. Click **"Save Current"**
-
-### Switch to RUNNING Mode
-- Click the mode button again
-- Changes to **"Mode: RUNNING"** (green)
-
-### Test in iRacing
-1. In your practice session, press your configured keys
-2. Watch brake bias change!
-3. Press your preset button for instant adjustment
-
----
-
-## Done! 🎉
-
-You're now set up with basic control access.
-
----
-
-## Next Steps
-
-### Add More Controls
-Repeat Step 4 for other controls:
-- Traction Control
-- ABS
-- Anti-roll bars
-- Diff settings
-- Whatever you need!
-
-### Set Up HUD Overlay
-1. Go to **"HUD / Overlay"** tab
-2. Check boxes for values you want to see
-3. Click **"Apply Style"**
-4. Overlay shows in top-left (drag to reposition)
-
-### Create Combo Macros
-1. Go to **"⚡ Combos"** tab
-2. Enter values for multiple controls at once
-3. Bind to a single button
-4. One press adjusts everything!
-
-### Adjust Timing
-If adjustments are too fast/slow:
-1. Click **Options** → **Timing Adjustments**
-2. Try different profiles
-3. Or customize your own
-
----
-
-## Quick Tips
-
-### For Best Results
-- ✅ Use in **private practice sessions**
-- ✅ Test thoroughly before relying on it
-- ✅ Save configurations for each car
-- ✅ Create presets for your common values
-
-### Common Mistakes to Avoid
-- ❌ Forgetting to switch to RUNNING mode
-- ❌ Not saving after configuration
-- ❌ Using keys that conflict with iRacing
-- ❌ Testing in public/competitive sessions
-
-### Keyboard Key Suggestions
-Good keys to use (typically don't conflict):
-- **Numpad keys** (0-9, +, -, *, /)
-- **F13-F24** (if your keyboard has them)
-- **Ctrl+[key]** combinations
-- **Alt+[key]** combinations
-
-Avoid these (usually used by iRacing):
-- F1-F12 (camera views, black box)
-- Tab, Enter, Esc
-- WASD, Arrow keys
-- Space, Shift, Ctrl (without modifiers)
-
----
-
-## Troubleshooting Quick Fixes
-
-### "Cannot connect to iRacing"
-- Is iRacing running?
-- Are you in a session (not menus)?
-- Are you in the car (Drive mode)?
-- → Restart both applications
-
-### "Controls not working"
-- Are you in RUNNING mode? (check top button)
-- Did you save the configuration?
-- Are the keys showing names (not "Set Increase")?
-- → Switch to CONFIG, verify keys, save, switch back
-
-### "HUD not visible"
-- Options → Show/Hide Overlay
-- Check if it's off-screen (try dragging)
-- Verify opacity isn't too low
-- → Go to HUD tab, check boxes, click Apply
-
----
-
-## Important Reminders
-
-### Use Responsibly
-- This is an **accessibility tool**
-- For **educational purposes**
-- Test in **private sessions only**
-- **You're responsible** for compliance
-
-### Keep Private
-- Don't post about it publicly
-- Don't share screenshots
-- Don't create tutorials
-- Keep confidential
-
-### Read Full Docs
-When you have time, read:
-- **README.md** - Complete feature overview
-- **DISCLAIMER.md** - Legal requirements
-- **LICENSE.md** - Terms of use
-
----
-
-## Support
-
-Need help?
-1. Read INSTALLATION.md for detailed troubleshooting
-2. Check all documentation files
-3. Test thoroughly in private sessions
-4. Contact privately (never publicly)
-
----
-
-## That's It!
-
-You're ready to go. Use wisely and responsibly.
-
-**Remember**: Private sessions. Genuine needs. Ethical use.
+## Common Fixes
+- **No telemetry:** be in Drive mode and rescan controls.
+- **Force feedback loss:** start Dominant Control before iRacing or use Keyboard Only Mode.
+- **HUD missing:** toggle overlay visibility and drag it back on-screen.
+- **Voice misfires:** lower background noise or switch to a smaller Vosk model.
 
 Happy racing! 🏁

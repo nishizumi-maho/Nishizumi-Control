@@ -157,6 +157,19 @@ CONFIG_FILE = os.path.join(CONFIG_FOLDER, "config_v3.json")
 PENDING_SCAN_FILE = os.path.join(CONFIG_FOLDER, "pending_scan.flag")
 ICON_CANDIDATES = ["DominantControl.ico", "DominantControl.png", "app.ico", "app.png"]
 
+# Modern color palette for the refreshed UI
+MODERN_COLORS = {
+    "bg": "#0f172a",
+    "surface": "#111827",
+    "border": "#1f2937",
+    "text": "#e5e7eb",
+    "muted": "#9ca3af",
+    "accent": "#6366f1",
+    "accent_active": "#4f46e5",
+    "success": "#22c55e",
+    "warning": "#f59e0b"
+}
+
 
 def resolve_resource_path(filename: str) -> Optional[str]:
     """Return the first existing path for a bundled or local resource."""
@@ -3238,6 +3251,10 @@ class iRacingControlApp:
         self.root.geometry("820x900")
         apply_app_icon(self.root)
 
+        self.colors = MODERN_COLORS
+        self._init_theme()
+        self._create_header()
+
         # Thread-safe UI queue
         self._uiq: "queue.Queue[Tuple[Callable, tuple, dict]]" = queue.Queue()
         self.root.after(30, self._drain_ui_queue)
@@ -3431,6 +3448,172 @@ class iRacingControlApp:
 
         self.root.after(30, self._drain_ui_queue)
 
+    def _init_theme(self):
+        """Apply a refreshed visual theme across the application."""
+        self.root.configure(bg=self.colors["bg"])
+        self.root.option_add("*Background", self.colors["bg"])
+        self.root.option_add("*Foreground", self.colors["text"])
+        self.root.option_add("*Font", ("Inter", 10))
+        self.root.option_add("*TNotebook.TabPadding", [12, 8])
+
+        style = ttk.Style(self.root)
+        style.theme_use("clam")
+
+        style.configure("TFrame", background=self.colors["bg"])
+        style.configure("Surface.TFrame", background=self.colors["surface"])
+        style.configure(
+            "Card.TFrame",
+            background=self.colors["surface"],
+            bordercolor=self.colors["border"],
+            borderwidth=1,
+            relief="solid"
+        )
+
+        style.configure(
+            "Card.TLabelframe",
+            background=self.colors["surface"],
+            foreground=self.colors["text"],
+            bordercolor=self.colors["border"],
+            borderwidth=1,
+            relief="solid"
+        )
+        style.configure(
+            "Card.TLabelframe.Label",
+            background=self.colors["surface"],
+            foreground=self.colors["text"],
+            font=("Inter", 10, "bold")
+        )
+
+        style.configure(
+            "Primary.TButton",
+            background=self.colors["accent"],
+            foreground="white",
+            padding=10,
+            relief="flat"
+        )
+        style.map(
+            "Primary.TButton",
+            background=[("active", self.colors["accent_active"])]
+        )
+
+        style.configure(
+            "Secondary.TButton",
+            background=self.colors["border"],
+            foreground=self.colors["text"],
+            padding=9,
+            relief="flat"
+        )
+        style.map(
+            "Secondary.TButton",
+            background=[("active", self.colors["border"])]
+        )
+
+        style.configure(
+            "Success.TButton",
+            background=self.colors["success"],
+            foreground="white",
+            padding=10,
+            relief="flat"
+        )
+        style.map(
+            "Success.TButton",
+            background=[("active", "#16a34a")]
+        )
+
+        style.configure(
+            "Warning.TButton",
+            background=self.colors["warning"],
+            foreground="white",
+            padding=10,
+            relief="flat"
+        )
+        style.map(
+            "Warning.TButton",
+            background=[("active", "#d97706")]
+        )
+
+    def _status_pill(self, parent: tk.Widget, text: str, bg: str) -> tk.Label:
+        """Create a pill-style label for quick status summaries."""
+
+        label = tk.Label(
+            parent,
+            text=text,
+            bg=bg,
+            fg="white",
+            font=("Inter", 9, "bold"),
+            padx=10,
+            pady=6,
+            bd=0,
+            relief="flat"
+        )
+        label.pack(side="left", padx=(0, 6))
+        return label
+
+    def _create_header(self):
+        """Create a hero-style header that introduces the app."""
+
+        header = ttk.Frame(self.root, style="Surface.TFrame")
+        header.pack(fill="x", padx=10, pady=(10, 4))
+
+        title_row = ttk.Frame(header, style="Surface.TFrame")
+        title_row.pack(fill="x")
+
+        ttk.Label(
+            title_row,
+            text="DominantControl",
+            foreground=self.colors["text"],
+            background=self.colors["surface"],
+            font=("Inter", 18, "bold")
+        ).pack(side="left")
+
+        ttk.Label(
+            title_row,
+            text="Modern control companion for iRacing",
+            foreground=self.colors["muted"],
+            background=self.colors["surface"],
+            font=("Inter", 10)
+        ).pack(side="left", padx=8)
+
+        badge_row = ttk.Frame(header, style="Surface.TFrame")
+        badge_row.pack(fill="x", pady=(8, 2))
+
+        self.mode_pill = self._status_pill(
+            badge_row,
+            "Mode: RUNNING",
+            self.colors["success"]
+        )
+        self.overlay_pill = self._status_pill(
+            badge_row,
+            "HUD Visible",
+            self.colors["accent"]
+        )
+        self.voice_pill = self._status_pill(
+            badge_row,
+            "Voice Disabled",
+            self.colors["border"]
+        )
+
+    def _refresh_header_pills(self):
+        """Update header badges to reflect current state."""
+
+        running = (self.app_state == "RUNNING")
+        self.mode_pill.config(
+            text=f"Mode: {self.app_state}",
+            bg=self.colors["success" if running else "warning"]
+        )
+
+        overlay_text = "HUD Visible" if self.overlay_visible else "HUD Hidden"
+        overlay_color = (
+            self.colors["accent"] if self.overlay_visible else self.colors["border"]
+        )
+        self.overlay_pill.config(text=overlay_text, bg=overlay_color)
+
+        voice_text = "Voice Enabled" if self.use_voice.get() else "Voice Disabled"
+        voice_color = (
+            self.colors["accent"] if self.use_voice.get() else self.colors["border"]
+        )
+        self.voice_pill.config(text=voice_text, bg=voice_color)
+
     def _create_menu(self):
         """Create application menu bar."""
         menubar = tk.Menu(self.root)
@@ -3466,24 +3649,31 @@ class iRacingControlApp:
     def _create_main_ui(self):
         """Create main user interface."""
         # Mode toggle button
-        mode_frame = tk.Frame(self.root, pady=5)
-        mode_frame.pack(fill="x", padx=10)
+        mode_frame = ttk.Frame(self.root, style="Surface.TFrame")
+        mode_frame.pack(fill="x", padx=10, pady=(4, 2))
 
-        self.btn_mode = tk.Button(
+        ttk.Label(
+            mode_frame,
+            text="Control mode",
+            foreground=self.colors["muted"],
+            background=self.colors["surface"],
+            font=("Inter", 9, "bold")
+        ).pack(anchor="w", pady=(0, 4))
+
+        self.btn_mode = ttk.Button(
             mode_frame,
             text="Mode: RUNNING",
-            bg="#90ee90",
-            command=self.toggle_mode,
-            font=("Arial", 10, "bold"),
-            height=2
+            style="Success.TButton",
+            command=self.toggle_mode
         )
         self.btn_mode.pack(fill="x")
 
-        helper_frame = tk.LabelFrame(
+        helper_frame = ttk.LabelFrame(
             self.root,
-            text="Getting started"
+            text="Quick start",
+            style="Card.TLabelframe"
         )
-        helper_frame.pack(fill="x", padx=10, pady=(0, 6))
+        helper_frame.pack(fill="x", padx=10, pady=(4, 8))
 
         helper_text = (
             "Follow the steps below in order: 1) pick your car and track, "
@@ -3494,47 +3684,57 @@ class iRacingControlApp:
             helper_frame,
             text=helper_text,
             wraplength=760,
-            justify="left"
-        ).pack(fill="x", padx=8, pady=4)
+            justify="left",
+            bg=self.colors["surface"],
+            fg=self.colors["muted"],
+            font=("Inter", 10)
+        ).pack(fill="x", padx=12, pady=8)
 
         # Settings row
-        settings_frame = tk.Frame(self.root)
-        settings_frame.pack(fill="x", padx=10, pady=5)
+        settings_frame = ttk.Frame(self.root, style="Surface.TFrame")
+        settings_frame.pack(fill="x", padx=10, pady=4)
 
         self.check_safe = tk.Checkbutton(
             settings_frame,
             text="Keyboard Only Mode (requires restart)",
             variable=self.use_keyboard_only,
-            command=self.trigger_safe_mode_update
+            command=self.trigger_safe_mode_update,
+            bg=self.colors["surface"],
+            fg=self.colors["text"]
         )
         self.check_safe.pack(side="left")
 
         tk.Label(
             settings_frame,
             text="(No joystick/wheel buttons)",
-            fg="gray",
-            font=("Arial", 8)
+            fg=self.colors["muted"],
+            bg=self.colors["surface"],
+            font=("Inter", 9)
         ).pack(side="left", padx=4)
 
-        tk.Button(
+        ttk.Button(
             settings_frame,
             text="Voice/Audio Options",
+            style="Secondary.TButton",
             command=self.open_voice_audio_settings
         ).pack(side="right")
 
         # Auto-detect
-        auto_frame = tk.Frame(self.root)
+        auto_frame = ttk.Frame(self.root, style="Surface.TFrame")
         auto_frame.pack(fill="x", padx=10, pady=(0, 5))
 
         tk.Checkbutton(
             auto_frame,
             text="Auto-detect Car/Track via iRacing",
-            variable=self.auto_detect
+            variable=self.auto_detect,
+            bg=self.colors["surface"],
+            fg=self.colors["text"]
         ).pack(anchor="w")
 
-        stability_frame = tk.LabelFrame(
+        stability_frame = ttk.LabelFrame(
             self.root,
-            text="Stability Options"
+            text="Stability Options",
+            style="Card.TLabelframe"
         )
         stability_frame.pack(fill="x", padx=10, pady=5)
 
@@ -3542,87 +3742,94 @@ class iRacingControlApp:
             stability_frame,
             text="Restart before rescanning controls (after the first scan)",
             variable=self.auto_restart_on_rescan,
-            command=self.schedule_save
-        ).pack(anchor="w", pady=2)
+            command=self.schedule_save,
+            bg=self.colors["surface"],
+            fg=self.colors["text"]
+        ).pack(anchor="w", pady=2, padx=4)
 
         tk.Checkbutton(
             stability_frame,
             text="Auto-restart and scan when joining a Race session",
             variable=self.auto_restart_on_race,
-            command=self.schedule_save
-        ).pack(anchor="w", pady=2)
+            command=self.schedule_save,
+            bg=self.colors["surface"],
+            fg=self.colors["text"]
+        ).pack(anchor="w", pady=2, padx=4)
 
         # Car/Track manager
-        presets_frame = tk.LabelFrame(
+        presets_frame = ttk.LabelFrame(
             self.root,
-            text="Step 1: Choose your car and track"
+            text="Step 1: Choose your car and track",
+            style="Card.TLabelframe"
         )
-        presets_frame.pack(fill="x", padx=10, pady=5)
+        presets_frame.pack(fill="x", padx=10, pady=6)
 
-        selector_frame = tk.Frame(presets_frame)
+        selector_frame = ttk.Frame(presets_frame, style="Surface.TFrame")
         selector_frame.pack(fill="x", padx=5, pady=2)
 
-        tk.Label(selector_frame, text="Car:").pack(side="left")
+        ttk.Label(selector_frame, text="Car:").pack(side="left")
         self.combo_car = ttk.Combobox(selector_frame, width=30)
         self.combo_car.pack(side="left", padx=5)
         self.combo_car.bind("<<ComboboxSelected>>", self.on_car_selected)
 
-        tk.Label(selector_frame, text="Track:").pack(side="left")
+        ttk.Label(selector_frame, text="Track:").pack(side="left")
         self.combo_track = ttk.Combobox(selector_frame, width=30)
         self.combo_track.pack(side="left", padx=5)
 
-        actions_frame = tk.Frame(presets_frame)
+        actions_frame = ttk.Frame(presets_frame, style="Surface.TFrame")
         actions_frame.pack(fill="x", padx=5, pady=5)
 
-        tk.Button(
+        ttk.Button(
             actions_frame,
             text="Load",
             command=self.action_load_preset,
-            bg="#e0e0e0"
+            style="Secondary.TButton"
         ).pack(side="left", expand=True, fill="x", padx=2)
 
-        tk.Button(
+        ttk.Button(
             actions_frame,
             text="Save Current",
             command=self.action_save_preset,
-            bg="#ADD8E6"
+            style="Primary.TButton"
         ).pack(side="left", expand=True, fill="x", padx=2)
 
-        tk.Button(
+        ttk.Button(
             actions_frame,
             text="Delete",
             command=self.action_delete_preset,
-            bg="#ffcccc"
+            style="Secondary.TButton"
         ).pack(side="left", expand=True, fill="x", padx=2)
 
         # Device management
-        devices_frame = tk.LabelFrame(
+        devices_frame = ttk.LabelFrame(
             self.root,
-            text="Step 2: Confirm input devices (joystick/wheel)"
+            text="Step 2: Confirm input devices (joystick/wheel)",
+            style="Card.TLabelframe"
         )
         devices_frame.pack(fill="x", padx=10, pady=5)
 
-        tk.Button(
+        ttk.Button(
             devices_frame,
             text="🎮 Manage Devices",
             command=self.open_device_manager,
-            bg="#e0e0e0"
-        ).pack(fill="x", padx=5, pady=5)
+            style="Secondary.TButton"
+        ).pack(fill="x", padx=8, pady=8)
 
         # Scan button
-        self.btn_scan = tk.Button(
+        self.btn_scan = ttk.Button(
             self.root,
             text="Step 3: Scan driver controls for the selected car",
             command=self.scan_driver_controls,
-            bg="lightblue"
+            style="Primary.TButton"
         )
-        self.btn_scan.pack(fill="x", padx=10, pady=5)
+        self.btn_scan.pack(fill="x", padx=10, pady=6)
 
         tk.Label(
             self.root,
             text="Tip: Scan after changing devices or presets to keep bindings in sync.",
-            fg="gray",
-            font=("Arial", 9)
+            fg=self.colors["muted"],
+            bg=self.colors["bg"],
+            font=("Inter", 9)
         ).pack(fill="x", padx=12, pady=(0, 4))
 
         # Main notebook
@@ -3635,6 +3842,7 @@ class iRacingControlApp:
 
         self.rebuild_tabs(self.active_vars)
         self.update_preset_ui()
+        self._refresh_header_pills()
 
     # ------------------------------------------------------------------
     # Options UI
@@ -3955,7 +4163,7 @@ class iRacingControlApp:
             self.app_state = "CONFIG"
             self.btn_mode.config(
                 text="Mode: CONFIG (Click to Save & Run)",
-                bg="orange"
+                style="Warning.TButton"
             )
             input_manager.active = False
             self._clear_keyboard_hotkeys()
@@ -3963,7 +4171,7 @@ class iRacingControlApp:
         else:
             # Switch to RUNNING
             self.app_state = "RUNNING"
-            self.btn_mode.config(text="Mode: RUNNING", bg="#90ee90")
+            self.btn_mode.config(text="Mode: RUNNING", style="Success.TButton")
             input_manager.active = True
             self.register_current_listeners()
 
@@ -3973,6 +4181,8 @@ class iRacingControlApp:
             tab.set_editing_state(editing)
         if self.combo_tab:
             self.combo_tab.set_editing_state(editing)
+
+        self._refresh_header_pills()
 
     def focus_window(self):
         """Force focus to main window."""
@@ -4597,6 +4807,8 @@ class iRacingControlApp:
             self.overlay.deiconify()
             self.overlay_visible = True
 
+        self._refresh_header_pills()
+
     def notify_overlay_status(self, text: str, color: str):
         """Update overlay status text temporarily."""
         self.ui(self.overlay.update_status_text, text, color)
@@ -5089,6 +5301,7 @@ class iRacingControlApp:
 
         self.register_current_listeners()
         self.schedule_save()
+        self._refresh_header_pills()
 
     def register_current_listeners(self):
         """Register keyboard/joystick listeners based on current config."""

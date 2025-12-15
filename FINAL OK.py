@@ -976,6 +976,9 @@ class VoiceListener:
         self.vosk_model_path: str = ""
         self.vosk_model: Optional[Any] = None
         self._vosk_error: Optional[str] = None
+        self.whisper_binary_path: str = ""
+        self.whisper_model_path: str = ""
+        self._whisper_error: Optional[str] = None
         self.device_index: Optional[int] = None
         self.ambient_duration = VOICE_TUNING_DEFAULTS["ambient_duration"]
         self.initial_timeout = VOICE_TUNING_DEFAULTS["initial_timeout"]
@@ -1033,9 +1036,15 @@ class VoiceListener:
         self.running = False
         self._watchdog.stop()
 
-    def set_engine(self, engine: str, model_path: str = ""):
+    def set_engine(
+        self,
+        engine: str,
+        model_path: str = "",
+        whisper_binary: str = "",
+        whisper_model: str = ""
+    ):
         """Configure which recognition engine to use."""
-        engine = engine if engine in {"speech", "vosk"} else "speech"
+        engine = engine if engine in {"speech", "vosk", "whisper.cpp"} else "speech"
         self.engine = engine
         self.vosk_model_path = model_path
 
@@ -1044,6 +1053,13 @@ class VoiceListener:
         else:
             self.vosk_model = None
             self._vosk_error = None
+
+        if engine == "whisper.cpp":
+            self.whisper_binary_path = whisper_binary
+            self.whisper_model_path = whisper_model
+            self._ensure_whisper_ready()
+        else:
+            self._whisper_error = None
 
     def _apply_recognizer_settings(self, recognizer):
         """Apply tuning values to a speech_recognition.Recognizer."""
@@ -1133,11 +1149,43 @@ class VoiceListener:
             self._vosk_error = str(exc)
             print(f"[Voice][Vosk] Failed to load model: {exc}")
 
+    def _ensure_whisper_ready(self) -> bool:
+        """Validate whisper.cpp prerequisites."""
+
+        if not self.whisper_binary_path:
+            self._whisper_error = "Select whisper.cpp executable"
+            return False
+
+        if not os.path.exists(self.whisper_binary_path):
+            self._whisper_error = "whisper.cpp executable not found"
+            return False
+
+        if not os.access(self.whisper_binary_path, os.X_OK):
+            self._whisper_error = "whisper.cpp is not executable"
+            return False
+
+        if not self.whisper_model_path:
+            self._whisper_error = "Select a ggml/gguf model (.bin/.gguf)"
+            return False
+
+        if not os.path.exists(self.whisper_model_path):
+            self._whisper_error = "Model file not found"
+            return False
+
+        self._whisper_error = None
+        return True
+
     def _recognize_text(self, audio, recognizer=None) -> Optional[str]:
         """Try multiple engines to convert audio to text."""
         rec = recognizer or self.recognizer
         if not rec:
             return None
+
+        if self.engine == "whisper.cpp":
+            text = self._transcribe_with_whisper(audio)
+            if text:
+                self.last_engine = "whisper.cpp"
+                return text
 
         if self.engine == "vosk" and HAS_VOSK and self.vosk_model:
             try:
@@ -1173,6 +1221,74 @@ class VoiceListener:
                 continue
 
         return None
+
+    def _transcribe_with_whisper(self, audio) -> Optional[str]:
+        """Run whisper.cpp as a subprocess over the captured audio."""
+
+        if not self._ensure_whisper_ready():
+            return None
+
+        tmp_path = None
+        try:
+            wav_data = audio.get_wav_data(convert_rate=16000, convert_width=2)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                tmp.write(wav_data)
+                tmp_path = tmp.name
+
+            cmd = [
+                self.whisper_binary_path,
+                "--model",
+                self.whisper_model_path,
+                "--file",
+                tmp_path,
+                "--output-json"
+            ]
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=90
+            )
+
+            if result.returncode != 0:
+                self._whisper_error = result.stderr.strip() or "whisper.cpp failed"
+                return None
+
+            text: Optional[str] = None
+            for line in reversed(result.stdout.splitlines()):
+                cleaned = line.strip()
+                if not cleaned:
+                    continue
+                if cleaned.startswith("{"):
+                    try:
+                        parsed = json.loads(cleaned)
+                        text = (parsed.get("text") or "").strip()
+                        if text:
+                            break
+                    except Exception:
+                        continue
+                if "text:" in cleaned.lower():
+                    text = cleaned.split(":", 1)[-1].strip()
+                    if text:
+                        break
+
+            if text:
+                self._whisper_error = None
+                return text
+
+            self._whisper_error = "No text returned by whisper.cpp"
+            return None
+        except Exception as exc:
+            self._whisper_error = str(exc)
+            print(f"[Voice][Whisper] Recognition error: {exc}")
+            return None
+        finally:
+            if tmp_path:
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
 
     def _listen_loop(self):
         if not self.recognizer:
@@ -3298,11 +3414,16 @@ class iRacingControlApp:
         self.use_voice = tk.BooleanVar(value=False)
         self.voice_engine = tk.StringVar(value="speech")
         self.vosk_model_path = tk.StringVar(value="")
+        self.whisper_binary_path = tk.StringVar(value="")
+        self.whisper_model_path = tk.StringVar(value="")
         self.microphone_device = tk.IntVar(value=-1)
         self.audio_output_device = tk.IntVar(value=-1)
         self.vosk_status_var = tk.StringVar(value="")
+        self.whisper_status_var = tk.StringVar(value="")
         self.voice_engine_combo: Optional[ttk.Combobox] = None
         self.btn_vosk_model: Optional[tk.Button] = None
+        self.btn_whisper_binary: Optional[tk.Button] = None
+        self.btn_whisper_model: Optional[tk.Button] = None
         self.mic_combo: Optional[ttk.Combobox] = None
         self.audio_output_combo: Optional[ttk.Combobox] = None
         self.voice_ambient_duration = tk.DoubleVar(
@@ -3805,7 +3926,7 @@ class iRacingControlApp:
         engine_frame.pack(fill="x", padx=2, pady=6)
 
         ttk.Label(engine_frame, text="Voice Engine:").pack(side="left", padx=4)
-        engine_options = ["speech"] + (["vosk"] if HAS_VOSK else [])
+        engine_options = ["speech"] + (["vosk"] if HAS_VOSK else []) + ["whisper.cpp"]
         self.voice_engine_combo = ttk.Combobox(
             engine_frame,
             values=engine_options,
@@ -3830,9 +3951,29 @@ class iRacingControlApp:
         )
         self.btn_vosk_model.pack(side="left", padx=4)
 
+        self.btn_whisper_binary = tk.Button(
+            engine_frame,
+            text="Select whisper.cpp...",
+            command=self.choose_whisper_binary
+        )
+        self.btn_whisper_binary.pack(side="left", padx=4)
+
+        self.btn_whisper_model = tk.Button(
+            engine_frame,
+            text="Select Whisper Model...",
+            command=self.choose_whisper_model
+        )
+        self.btn_whisper_model.pack(side="left", padx=4)
+
         tk.Label(
             engine_frame,
             textvariable=self.vosk_status_var,
+            fg="gray"
+        ).pack(side="left", padx=6)
+
+        tk.Label(
+            engine_frame,
+            textvariable=self.whisper_status_var,
             fg="gray"
         ).pack(side="left", padx=6)
 
@@ -4823,6 +4964,8 @@ class iRacingControlApp:
             "use_voice": self.use_voice.get(),
             "voice_engine": self.voice_engine.get(),
             "vosk_model_path": self.vosk_model_path.get(),
+            "whisper_binary_path": self.whisper_binary_path.get(),
+            "whisper_model_path": self.whisper_model_path.get(),
             "voice_tuning": self._voice_tuning_config(),
             "microphone_device": self.microphone_device.get(),
             "audio_output_device": self.audio_output_device.get(),
@@ -4871,6 +5014,8 @@ class iRacingControlApp:
         self.use_voice.set(data.get("use_voice", False))
         self.voice_engine.set(data.get("voice_engine", "speech"))
         self.vosk_model_path.set(data.get("vosk_model_path", ""))
+        self.whisper_binary_path.set(data.get("whisper_binary_path", ""))
+        self.whisper_model_path.set(data.get("whisper_model_path", ""))
         self.microphone_device.set(data.get("microphone_device", -1))
         self.audio_output_device.set(data.get("audio_output_device", -1))
         self._set_voice_tuning_vars(
@@ -5016,12 +5161,38 @@ class iRacingControlApp:
 
         return "Loading Vosk model..."
 
+    def _format_whisper_status(self) -> str:
+        """Return a status string for whisper.cpp usage."""
+
+        engine = self.voice_engine.get()
+        if engine != "whisper.cpp":
+            return ""
+
+        if not self.whisper_binary_path.get():
+            return "Select whisper.cpp executable"
+
+        if not os.path.exists(self.whisper_binary_path.get()):
+            return "Executable not found"
+
+        if not self.whisper_model_path.get():
+            return "Select a .bin/.gguf model"
+
+        if not os.path.exists(self.whisper_model_path.get()):
+            return "Model not found"
+
+        if voice_listener._whisper_error:
+            return f"Whisper error: {voice_listener._whisper_error}"
+
+        model_name = os.path.basename(self.whisper_model_path.get())
+        exe_name = os.path.basename(self.whisper_binary_path.get())
+        return f"{exe_name} | {model_name}"
+
     def on_voice_engine_changed(self):
         """Handle engine dropdown changes."""
         selection = (
             self.voice_engine_combo.get() if self.voice_engine_combo else self.voice_engine.get()
         )
-        if selection not in {"speech", "vosk"}:
+        if selection not in {"speech", "vosk", "whisper.cpp"}:
             selection = "speech"
 
         if selection == "vosk" and not HAS_VOSK:
@@ -5041,6 +5212,32 @@ class iRacingControlApp:
         self._update_voice_controls()
         self.register_current_listeners()
 
+    def choose_whisper_binary(self):
+        """Prompt the user to select the whisper.cpp executable."""
+        path = filedialog.askopenfilename(
+            title="Select whisper.cpp executable",
+            filetypes=[("Executable", "*"), ("All files", "*")]
+        )
+        if not path:
+            return
+
+        self.whisper_binary_path.set(path)
+        self._update_voice_controls()
+        self.register_current_listeners()
+
+    def choose_whisper_model(self):
+        """Prompt the user to select a whisper.cpp model file."""
+        path = filedialog.askopenfilename(
+            title="Select Whisper model (.bin/.gguf)",
+            filetypes=[("Whisper models", "*.bin *.gguf"), ("All files", "*")]
+        )
+        if not path:
+            return
+
+        self.whisper_model_path.set(path)
+        self._update_voice_controls()
+        self.register_current_listeners()
+
     def _update_voice_controls(self):
         """Refresh UI state and listener config for voice engine selection."""
         voice_listener.update_tuning(self._voice_tuning_config())
@@ -5055,6 +5252,13 @@ class iRacingControlApp:
 
         if engine == "vosk":
             voice_listener.set_engine(engine, self.vosk_model_path.get())
+        elif engine == "whisper.cpp":
+            voice_listener.set_engine(
+                engine,
+                self.vosk_model_path.get(),
+                self.whisper_binary_path.get(),
+                self.whisper_model_path.get()
+            )
         else:
             voice_listener.set_engine("speech", "")
 
@@ -5062,6 +5266,13 @@ class iRacingControlApp:
         if self.btn_vosk_model:
             self.btn_vosk_model.config(state=btn_state)
         self.vosk_status_var.set(self._format_vosk_status())
+
+        whisper_state = "normal" if engine == "whisper.cpp" else "disabled"
+        if self.btn_whisper_binary:
+            self.btn_whisper_binary.config(state=whisper_state)
+        if self.btn_whisper_model:
+            self.btn_whisper_model.config(state=whisper_state)
+        self.whisper_status_var.set(self._format_whisper_status())
 
     def open_voice_test_dialog(self):
         """Open the dialog that validates configured voice commands."""
@@ -5155,7 +5366,9 @@ class iRacingControlApp:
             voice_listener.update_tuning(self._voice_tuning_config())
             voice_listener.set_engine(
                 self.voice_engine.get(),
-                self.vosk_model_path.get()
+                self.vosk_model_path.get(),
+                self.whisper_binary_path.get(),
+                self.whisper_model_path.get()
             )
             voice_listener.set_phrases(self.voice_phrase_map)
             voice_listener.set_enabled(True)

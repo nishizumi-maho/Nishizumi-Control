@@ -838,7 +838,7 @@ class VoiceListener:
             self._apply_recognizer_settings(self.recognizer)
 
     def set_phrases(self, phrases: Dict[str, Callable]):
-        """Replace the phrase→callback map."""
+        """Replace the phrase-to-callback map."""
         with self.lock:
             self.callbacks = {k.strip().lower(): v for k, v in phrases.items() if k}
 
@@ -1123,15 +1123,15 @@ class VoiceTestDialog(tk.Toplevel):
         super().__init__(parent)
         self.app = app
         self.phrases_map = {k.strip().lower(): v for k, v in phrases_map.items()}
-        self.title("Teste de Voz e Macros")
+        self.title("Voice and Macro Test")
         self.geometry("430x360")
 
         info = tk.Label(
             self,
             text=(
-                "Fale uma das frases configuradas para acionar o macro.\n"
-                "Use o botão de teste para garantir que o microfone e as frases"
-                " estão funcionando."
+                "Speak one of the configured phrases to trigger the macro.\n"
+                "Use the test button to ensure your microphone and phrases are"
+                " working."
             ),
             wraplength=400,
             justify="left"
@@ -1140,11 +1140,11 @@ class VoiceTestDialog(tk.Toplevel):
 
         phrases_text = "\n".join(
             f"• {phrase}" for phrase in sorted(self.phrases_map.keys())
-        ) or "Nenhuma frase configurada."
+        ) or "No phrases configured."
 
         tk.Label(
             self,
-            text="Frases disponíveis:",
+            text="Available phrases:",
             font=("Arial", 10, "bold")
         ).pack(anchor="w", padx=10)
 
@@ -1154,12 +1154,12 @@ class VoiceTestDialog(tk.Toplevel):
             width=400
         ).pack(fill="x", padx=10, pady=(0, 8))
 
-        self.status_var = tk.StringVar(value="Aguardando teste...")
-        self.heard_var = tk.StringVar(value="(nada ainda)")
+        self.status_var = tk.StringVar(value="Waiting for test...")
+        self.heard_var = tk.StringVar(value="(nothing yet)")
 
         self.btn_listen = tk.Button(
             self,
-            text="🎤 Ouvir e testar",
+            text="🎤 Listen and Test",
             command=self.start_listen,
             bg="#ADD8E6"
         )
@@ -1177,50 +1177,50 @@ class VoiceTestDialog(tk.Toplevel):
         manual = tk.Frame(self)
         manual.pack(fill="x", padx=10, pady=(6, 10))
 
-        tk.Label(manual, text="Executar frase manualmente:").pack(
+        tk.Label(manual, text="Run phrase manually:").pack(
             anchor="w"
         )
         self.entry_manual = ttk.Entry(manual)
         self.entry_manual.pack(fill="x", pady=2)
         tk.Button(
             manual,
-            text="Rodar macro",
+            text="Run macro",
             command=self.run_manual_phrase,
             bg="#90ee90"
         ).pack(fill="x", pady=2)
 
     def start_listen(self):
         """Start a one-off listening test."""
-        self.btn_listen.config(state="disabled", text="Escutando...")
-        self.status_var.set("Fale agora o comando configurado...")
-        self.heard_var.set("(escutando)")
+        self.btn_listen.config(state="disabled", text="Listening...")
+        self.status_var.set("Speak the configured command now...")
+        self.heard_var.set("(listening)")
         threading.Thread(target=self._listen_worker, daemon=True).start()
 
     def _listen_worker(self):
         phrase, error = voice_listener.capture_once()
 
         def finalize():
-            self.btn_listen.config(state="normal", text="🎤 Ouvir e testar")
+            self.btn_listen.config(state="normal", text="🎤 Listen and Test")
             if error:
-                self.status_var.set(f"Erro ao ouvir: {error}")
+                self.status_var.set(f"Error while listening: {error}")
                 return
 
             if phrase is None:
-                self.status_var.set("Voz indisponível.")
+                self.status_var.set("Voice unavailable.")
                 return
 
             normalized = phrase.strip()
-            self.heard_var.set(normalized or "(nada reconhecido)")
+            self.heard_var.set(normalized or "(nothing recognized)")
 
             if not normalized:
-                self.status_var.set("Nenhuma frase foi reconhecida.")
+                self.status_var.set("No phrase was recognized.")
                 return
 
             triggered = self._trigger_phrase(normalized)
             if triggered:
-                self.status_var.set("Macro acionado com sucesso!")
+                self.status_var.set("Macro triggered successfully!")
             else:
-                self.status_var.set("Frase reconhecida, mas nenhum macro associado.")
+                self.status_var.set("Phrase recognized, but no macro is linked.")
 
         self.after(0, finalize)
 
@@ -1237,13 +1237,13 @@ class VoiceTestDialog(tk.Toplevel):
         """Trigger macro manually from text input."""
         phrase = self.entry_manual.get().strip().lower()
         if not phrase:
-            self.status_var.set("Informe uma frase para testar.")
+            self.status_var.set("Enter a phrase to test.")
             return
 
         if self._trigger_phrase(phrase):
-            self.status_var.set("Macro executado manualmente.")
+            self.status_var.set("Macro executed manually.")
         else:
-            self.status_var.set("Nenhum macro associado a essa frase.")
+            self.status_var.set("No macro is linked to that phrase.")
 
 # ======================================================================
 # DEVICE SELECTOR DIALOG
@@ -1658,13 +1658,13 @@ class OverlayConfigTab(tk.Frame):
         }
 
         feedback_rows = [
-            ("ABS ativo por mais de (s)", "abs_hold_s"),
-            ("TC ativo por mais de (s)", "tc_hold_s"),
-            ("Slip de wheelspin (ratio)", "wheelspin_slip"),
-            ("Duração do wheelspin (s)", "wheelspin_hold_s"),
-            ("Slip de travamento (valor negativo)", "lockup_slip"),
-            ("Duração do travamento (s)", "lockup_hold_s"),
-            ("Cooldown entre alertas (s)", "cooldown_s"),
+            ("ABS active longer than (s)", "abs_hold_s"),
+            ("TC active longer than (s)", "tc_hold_s"),
+            ("Wheelspin slip (ratio)", "wheelspin_slip"),
+            ("Wheelspin duration (s)", "wheelspin_hold_s"),
+            ("Lock-up slip (negative value)", "lockup_slip"),
+            ("Lock-up duration (s)", "lockup_hold_s"),
+            ("Cooldown between alerts (s)", "cooldown_s"),
         ]
 
         for idx, (label, key) in enumerate(feedback_rows):
@@ -2013,7 +2013,7 @@ class GenericController:
             self.update_status("Adjusting...", "orange")
         if self.app:
             self.app.notify_overlay_status(
-                f"Adjusting {short_name} → {target}", 
+                f"Adjusting {short_name} -> {target}",
                 "orange"
             )
 
@@ -2522,7 +2522,7 @@ class ComboTab(tk.Frame):
 
         tk.Label(
             body,
-            text="⚡ Combo Adjustments (one trigger → multiple variables)",
+            text="⚡ Combo Adjustments (one trigger -> multiple variables)",
             fg="orange",
             font=("Arial", 10, "bold")
         ).pack(pady=5)
@@ -3255,7 +3255,7 @@ class iRacingControlApp:
         ).pack(anchor="w", pady=2)
 
         # Car/Track manager
-        presets_frame = tk.LabelFrame(self.root, text="Car → Track Manager")
+        presets_frame = tk.LabelFrame(self.root, text="Car -> Track Manager")
         presets_frame.pack(fill="x", padx=10, pady=5)
 
         selector_frame = tk.Frame(presets_frame)
@@ -4438,7 +4438,7 @@ class iRacingControlApp:
 
         if state["abs_active"] >= cfg["abs_hold_s"]:
             self._push_overlay_alert(
-                "ABS ativo demais: tente aliviar freio ou reduzir ABS.",
+                "ABS active too long: ease off the brake or lower ABS.",
                 "orange",
                 cfg,
                 now
@@ -4447,7 +4447,7 @@ class iRacingControlApp:
 
         if state["tc_active"] >= cfg["tc_hold_s"]:
             self._push_overlay_alert(
-                "TC acionando constantemente: considere baixar TC ou mapa.",
+                "TC constantly triggering: consider lowering TC or changing the map.",
                 "orange",
                 cfg,
                 now
@@ -4456,7 +4456,7 @@ class iRacingControlApp:
 
         if state["spin_active"] >= cfg["wheelspin_hold_s"]:
             self._push_overlay_alert(
-                "Wheelspin detectado: suba TC ou module o acelerador.",
+                "Wheelspin detected: raise TC or modulate the throttle.",
                 "orange",
                 cfg,
                 now
@@ -4465,7 +4465,7 @@ class iRacingControlApp:
 
         if state["lock_active"] >= cfg["lockup_hold_s"]:
             self._push_overlay_alert(
-                "Travamento detectado: aumente ABS ou alivie a pressão.",
+                "Lock-up detected: increase ABS or ease pedal pressure.",
                 "orange",
                 cfg,
                 now
@@ -4753,8 +4753,8 @@ class iRacingControlApp:
         """Open the dialog that validates configured voice commands."""
         if not HAS_SPEECH:
             messagebox.showinfo(
-                "Voz indisponível",
-                "Instale a biblioteca 'speech_recognition' para usar voz."
+                "Voice unavailable",
+                "Install the 'speech_recognition' package to enable voice control."
             )
             return
 
@@ -4763,8 +4763,8 @@ class iRacingControlApp:
 
         if not phrases_map:
             messagebox.showinfo(
-                "Sem macros",
-                "Adicione frases nas abas para testar comandos de voz."
+                "No macros found",
+                "Add phrases in the tabs to test voice commands."
             )
             return
 

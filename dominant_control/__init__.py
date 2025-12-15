@@ -4,5 +4,7 @@ __all__ = [
     "config",
     "dependencies",
     "input_engine",
+    "input_manager",
+    "tts",
     "watchdog",
 ]

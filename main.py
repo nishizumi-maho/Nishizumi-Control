@@ -678,7 +678,7 @@ class VoiceListener:
         self.running = False
 
     def _recognize_text(self, audio, recognizer=None) -> Optional[str]:
-        """Try multiple engines to convert audio to text."""
+        """Convert audio to text using the Windows SAPI engine only."""
         rec = recognizer or self.recognizer
         if not rec:
             return None
@@ -699,7 +699,10 @@ class VoiceListener:
             except Exception:
                 continue
 
-        return None
+        try:
+            return rec.recognize_sapi(audio)
+        except Exception:
+            return None
 
     def _listen_loop(self):
         if not self.recognizer:

@@ -8,4 +8,5 @@ __all__ = [
     "tts",
     "voice",
     "watchdog",
+    "ui",
 ]

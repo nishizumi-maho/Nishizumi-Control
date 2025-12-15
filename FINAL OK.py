@@ -105,6 +105,43 @@ warnings.filterwarnings(
     message="pkg_resources is deprecated as an API.*"
 )
 
+
+def _prepare_vosk_env() -> Optional[str]:
+    """Ensure Vosk DLLs are discoverable when running a bundled executable."""
+
+    candidates = []
+
+    if getattr(sys, "_MEIPASS", None):
+        candidates.append(os.path.join(sys._MEIPASS, "vosk"))
+        candidates.append(sys._MEIPASS)
+
+    current_dir = os.path.abspath(os.path.dirname(__file__))
+    candidates.extend(
+        [
+            os.environ.get("VOSK_DLL_PATH"),
+            os.path.join(current_dir, "vosk"),
+            current_dir,
+        ]
+    )
+
+    selected: Optional[str] = None
+    for path in candidates:
+        if not path or not os.path.isdir(path):
+            continue
+
+        selected = path
+        os.environ.setdefault("VOSK_DLL_PATH", path)
+
+        try:
+            if hasattr(os, "add_dll_directory"):
+                os.add_dll_directory(path)
+        except Exception:
+            pass
+
+        break
+
+    return selected
+
 # Optional dependencies
 try:
     import pygame
@@ -137,12 +174,16 @@ else:
     HAS_SPEECH = False
     print("Warning: 'speech_recognition' not installed. Voice triggers disabled.")
 
+VOSK_IMPORT_ERROR: Optional[str] = None
+_prepare_vosk_env()
 try:
     import vosk
     HAS_VOSK = True
-except ImportError:
+except Exception as exc:  # noqa: BLE001
     vosk = None
     HAS_VOSK = False
+    VOSK_IMPORT_ERROR = str(exc)
+    print(f"Warning: 'vosk' unavailable: {exc}")
 
 # ======================================================================
 # GLOBAL CONFIGURATION
@@ -5146,6 +5187,8 @@ class iRacingControlApp:
             return "Using Windows speech recognizer"
 
         if not HAS_VOSK:
+            if VOSK_IMPORT_ERROR:
+                return f"Vosk unavailable: {VOSK_IMPORT_ERROR}"
             return "Vosk not installed"
 
         model_path = self.vosk_model_path.get()

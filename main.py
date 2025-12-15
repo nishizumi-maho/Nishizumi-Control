@@ -2408,6 +2408,7 @@ class iRacingControlApp:
         self.last_session_type = ""
         self.scans_since_restart = 0
         self.pending_scan_on_start = False
+        self.skip_race_restart_once = False
         self._last_auto_pair: Tuple[str, str] = ("", "")
 
         # Auto-load tracking
@@ -3003,6 +3004,10 @@ class iRacingControlApp:
         if new_type != self.last_session_type:
             self.last_session_type = new_type
 
+            if self.skip_race_restart_once and new_type == "Race":
+                self.skip_race_restart_once = False
+                return False
+
             if self.auto_restart_on_race.get() and new_type == "Race":
                 self.pending_scan_on_start = True
                 mark_pending_scan()
@@ -3315,6 +3320,7 @@ class iRacingControlApp:
             self.pending_scan_on_start = True
 
         if self.pending_scan_on_start:
+            self.skip_race_restart_once = True
             self.pending_scan_on_start = False
             self.save_config()
             self.root.after(50, self.scan_driver_controls)

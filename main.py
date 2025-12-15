@@ -47,6 +47,7 @@ from dominant_control.config import (
     resolve_resource_path,
     restart_program,
 )
+from dominant_control.controller import GenericController
 from dominant_control.dependencies import (
     HAS_PYAUDIO,
     HAS_PYGAME,
@@ -60,12 +61,7 @@ from dominant_control.dependencies import (
 )
 from dominant_control.input_engine import (
     IS_WINDOWS,
-    _compute_timing,
-    _direct_pulse,
     _normalize_timing_config,
-    click_pulse,
-    press_key,
-    release_key,
 )
 from dominant_control.input_manager import input_manager
 from dominant_control.tts import speak_text

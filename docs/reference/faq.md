@@ -51,12 +51,19 @@ In **HUD / Overlay**, select which variables to show, adjust colors/font/opacity
 **How do I enable TTS?**  
 Turn on TTS in settings. If PyAudio is installed you can choose an output device; otherwise system default is used.
 
-**How do I set up Vosk voice commands?**  
-1) Install `vosk`, `SpeechRecognition`, and `pyaudio` (already in `requirements.txt`).  
-2) Download a model from [Vosk releases](https://alphacephei.com/vosk/models) and extract it.  
-3) Set the **Vosk model path** to the extracted folder.  
-4) Enable **Voice Commands** and test phrases like “Brake bias up” or “Traction control preset two.”  
+**How do I set up Vosk voice commands?**
+1) Install `vosk`, `SpeechRecognition`, and `pyaudio` (already in `requirements.txt`).
+2) Download a model from [Vosk releases](https://alphacephei.com/vosk/models) and extract it.
+3) Set the **Vosk model path** to the extracted folder and select **Vosk** as the engine.
+4) Enable **Voice Commands** and test phrases like “Brake bias up” or “Traction control preset two.”
 5) For noisy rooms, use push-to-talk or a smaller model to reduce false triggers.
+
+**How do I use Whisper instead of Vosk?**
+1) Ensure `faster-whisper` is installed (bundled in `requirements.txt`).
+2) Download a CTranslate2 Whisper model from the [Hugging Face faster-whisper collection](https://huggingface.co/collections/Systran/faster-whisper-655b5dd2959f16f30bdd5e23) (e.g., tiny/base/small for CPU; medium/large-v2 if you have GPU headroom).
+3) Extract the model folder so it contains `model.bin` and tokenizer files (e.g., `C:\whisper\faster-whisper-small`).
+4) In the app, pick **Whisper** as the voice engine, click **Select Whisper model folder**, and point to the extracted directory.
+5) Enable **Voice Commands** and test your phrases. If recognition lags, switch to a smaller model or place the model on a faster drive.
 
 ## Troubleshooting
 **The app can’t connect to iRacing.**  

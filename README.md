@@ -101,13 +101,21 @@ Each tab includes:
 - **Output Device:** Choose an audio device if PyAudio is installed; falls back to default otherwise.
 - **Voice Selection:** Uses the first available English voice; customize via OS voice settings.
 
-### 8) Voice Control with Vosk
-1. Install dependencies (`vosk`, `SpeechRecognition`, `pyaudio`).
-2. Download an English model from the [Vosk releases](https://alphacephei.com/vosk/models) (e.g., `vosk-model-small-en-us-0.15`).
-3. Extract the model folder somewhere convenient (e.g., `C:\vosk\vosk-model-small-en-us-0.15`).
-4. In the app settings, set the **Vosk model path** to that folder and enable **Voice Commands**.
-5. Speak commands like “Brake bias up,” “Traction control preset two,” or custom phrases you bind in the voice settings panel.
-6. Use a quiet environment or a push-to-talk input to reduce false triggers.
+### 8) Voice Control (Vosk or Whisper)
+- **Vosk (fast/small footprint):**
+  1. Install dependencies (`vosk`, `SpeechRecognition`, `pyaudio`).
+  2. Download an English model from the [Vosk releases](https://alphacephei.com/vosk/models) (e.g., `vosk-model-small-en-us-0.15`).
+  3. Extract the model folder somewhere convenient (e.g., `C:\vosk\vosk-model-small-en-us-0.15`).
+  4. In the app settings, set the **Vosk model path** to that folder and enable **Voice Commands**.
+
+- **Whisper (higher accuracy, optional GPU):**
+  1. Install the bundled dependency `faster-whisper` (in `requirements.txt`).
+  2. Download a CTranslate2 Whisper model from [Hugging Face](https://huggingface.co/collections/Systran/faster-whisper-655b5dd2959f16f30bdd5e23) (e.g., **tiny**, **base**, or **small**) and extract it (e.g., `C:\whisper\faster-whisper-small`).
+  3. In the app, choose **Whisper** as the voice engine, click **Select Whisper model folder**, and point to the extracted folder.
+  4. Enable **Voice Commands** and test phrases like “Brake bias up” or your custom bindings.
+  5. For best performance, pick the smallest model that recognizes your accent reliably; GPU users can try **medium** or **large-v2**.
+
+General tips: use a quiet environment or push-to-talk to reduce false triggers, and keep the model paths on a fast local drive.
 
 ### 9) Saving & Profiles
 - **Save Current:** Stores car+track specific bindings, HUD state, timing profile, presets, combos, and Vosk settings.

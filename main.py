@@ -194,7 +194,14 @@ def consume_pending_scan() -> bool:
 # ======================================================================
 # LOW-LEVEL INPUT ENGINE (CTYPES)
 # ======================================================================
-SendInput = ctypes.windll.user32.SendInput
+IS_WINDOWS = os.name == "nt" and hasattr(ctypes, "windll")
+
+if IS_WINDOWS:
+    SendInput = ctypes.windll.user32.SendInput
+else:
+    SendInput = None
+    print("Warning: Windows SendInput APIs unavailable; input injection disabled.")
+
 PUL = ctypes.POINTER(ctypes.c_ulong)
 
 
@@ -250,29 +257,35 @@ class Input(ctypes.Structure):
 def press_key(scan_code: int):
     """
     Press a key using its scan code.
-    
+
     Args:
         scan_code: The keyboard scan code to press
     """
+    if SendInput is None:
+        raise OSError("SendInput APIs are only available on Windows platforms.")
+
     extra = ctypes.c_ulong(0)
     ii_ = Input_I()
     ii_.ki = KeyBdInput(0, scan_code, 0x0008, 0, ctypes.pointer(extra))
     x = Input(ctypes.c_ulong(1), ii_)
-    ctypes.windll.user32.SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
+    SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
 
 
 def release_key(scan_code: int):
     """
     Release a key using its scan code.
-    
+
     Args:
         scan_code: The keyboard scan code to release
     """
+    if SendInput is None:
+        raise OSError("SendInput APIs are only available on Windows platforms.")
+
     extra = ctypes.c_ulong(0)
     ii_ = Input_I()
     ii_.ki = KeyBdInput(0, scan_code, 0x0008 | 0x0002, 0, ctypes.pointer(extra))
     x = Input(ctypes.c_ulong(1), ii_)
-    ctypes.windll.user32.SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
+    SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
 
 
 def _normalize_timing_config(timing: Dict[str, Any]) -> Dict[str, Any]:

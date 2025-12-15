@@ -32,6 +32,12 @@ Dominant Control maps iRacing’s driver-adjustable controls (e.g., brake bias, 
 
 See [`requirements.txt`](requirements.txt) for the full Python dependency list.
 
+## Project Layout
+- `main.py` — primary application entry point.
+- `dominant_control/` — core modules, UI components, and services.
+- `docs/` — organized documentation hub with guides, reference material, and legal notes.
+- `archive/` — legacy utilities retained for reference.
+
 ## Installation Options
 ### Option A: Run the Windows Build
 1. Download the latest release archive.
@@ -130,6 +136,8 @@ Each tab includes:
 - Not affiliated with iRacing.com Motorsport Simulations, LLC.
 
 ## Community & Support
-- Read the full documentation set: `readmefirst.txt`, `quickstart.md`, `install_guide.md`, `faq.md`, and `changelog.md`.
+- Browse the organized documentation hub at [`docs/README.md`](docs/README.md) for quick starts, guides, and FAQs.
+- Read the focused guides: [`docs/guides/readme_first.md`](docs/guides/readme_first.md), [`docs/guides/quickstart.md`](docs/guides/quickstart.md), and [`docs/guides/install_guide.md`](docs/guides/install_guide.md).
+- Check reference materials: [`docs/reference/faq.md`](docs/reference/faq.md) and [`docs/reference/changelog.md`](docs/reference/changelog.md).
 - Report issues or feature requests through the repository’s issue tracker; include OS version, app version, and reproduction steps.
 - Contributions are welcome via pull requests aligned with the MIT license.

@@ -648,6 +648,7 @@ class VoiceListener:
         self.thread: Optional[threading.Thread] = None
         self.lock = threading.Lock()
         self._noise_adjusted = False
+        self.last_engine: Optional[str] = None
 
     def set_phrases(self, phrases: Dict[str, Callable]):
         """Replace the phrase→callback map."""
@@ -682,8 +683,21 @@ class VoiceListener:
         if not rec:
             return None
 
-        if not hasattr(rec, "recognize_sapi"):
-            return None
+        engines: List[Tuple[str, Callable]] = []
+        if hasattr(rec, "recognize_sapi"):
+            engines.append(("sapi", rec.recognize_sapi))
+        if hasattr(rec, "recognize_sphinx"):
+            engines.append(("sphinx", rec.recognize_sphinx))
+        if hasattr(rec, "recognize_google"):
+            engines.append(("google", rec.recognize_google))
+
+        for name, engine in engines:
+            try:
+                result = engine(audio)
+                self.last_engine = name
+                return result
+            except Exception:
+                continue
 
         try:
             return rec.recognize_sapi(audio)

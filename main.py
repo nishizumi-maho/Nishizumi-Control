@@ -66,8 +66,7 @@ from dominant_control.ui.combo_tab import ComboTab
 from dominant_control.ui.control_tab import ControlTab
 from dominant_control.ui.device_selector import DeviceSelector
 from dominant_control.ui.overlay_config import OverlayConfigTab, ScrollableFrame
-from dominant_control.ui.overlay_feedback import OverlayFeedbackManager
-from dominant_control.ui.overlay_window import OverlayWindow
+from dominant_control.ui.overlay_manager import OverlayManager
 from dominant_control.ui.timing_window import GlobalTimingWindow
 from dominant_control.ui.voice_audio import build_voice_audio_window
 from dominant_control.voice import VoiceTestDialog, voice_listener
@@ -136,9 +135,8 @@ class iRacingControlApp:
         self.auto_load_attempted: set = set()
 
         # HUD overlay
-        self.overlay = OverlayWindow(root)
-        self.overlay.withdraw()
-        self.overlay_visible = True
+        self.overlay_manager = OverlayManager(root, self.ir)
+        self.overlay = self.overlay_manager.overlay
 
         # Settings
         self.use_keyboard_only = tk.BooleanVar(value=False)
@@ -179,9 +177,6 @@ class iRacingControlApp:
         self.messagebox = messagebox
 
         # Managers
-        self.overlay_feedback_manager = OverlayFeedbackManager(
-            self.ir, self.notify_overlay_status
-        )
         self.device_manager = DeviceAllowlistManager(self)
         self.lifecycle_manager = LifecycleManager(self)
         self.voice_control = VoiceControlManager(self)
@@ -198,13 +193,12 @@ class iRacingControlApp:
         # Initialize devices
         self.update_safe_mode()
 
+        # Sync overlay data sources and start updates
+        self.sync_overlay_manager()
+        self.overlay_manager.start()
+
         # Start background loops
         self.root.after(2000, self.auto_preset_loop)
-        self.update_overlay_loop()
-
-        # Show overlay if it was visible
-        if self.overlay_visible:
-            self.overlay.deiconify()
 
         # Activate input manager
         input_manager.active = (self.app_state == "RUNNING")
@@ -224,6 +218,17 @@ class iRacingControlApp:
     def ui(self, fn: Callable, *args, **kwargs):
         """Thread-safe UI dispatcher."""
         self._uiq.put((fn, args, kwargs))
+
+    def sync_overlay_manager(self):
+        """Provide the overlay manager with the latest state references."""
+
+        self.overlay_manager.update_context(
+            controllers=self.controllers,
+            car_overlay_config=self.car_overlay_config,
+            car_overlay_feedback=self.car_overlay_feedback,
+            current_car=self.current_car,
+            show_overlay_feedback=self.show_overlay_feedback.get(),
+        )
 
     def _drain_ui_queue(self):
         while True:
@@ -266,7 +271,7 @@ class iRacingControlApp:
         options_menu.add_separator()
         options_menu.add_command(
             label="Show/Hide Overlay",
-            command=self.toggle_overlay
+            command=self.overlay_manager.toggle_overlay
         )
         options_menu.add_command(
             label="Restart Application",
@@ -535,6 +540,7 @@ class iRacingControlApp:
             self.combo_track["values"] = []
 
         self.current_car = car
+        self.sync_overlay_manager()
 
     def auto_fill_ui(self, car: str, track: str):
         """Auto-fill car and track in UI."""
@@ -544,6 +550,7 @@ class iRacingControlApp:
         self.combo_car.set(car)
         self.on_car_selected(None)
         self.combo_track.set(track)
+        self.sync_overlay_manager()
 
     def action_save_preset(self):
         """Save current configuration as preset."""
@@ -624,6 +631,7 @@ class iRacingControlApp:
         )
         self.overlay_tab.load_for_car(car, self.active_vars, overlay_config)
 
+        self.sync_overlay_manager()
         self.register_current_listeners()
         print(f"[Preset] Loaded {car} / {track}")
 
@@ -728,6 +736,7 @@ class iRacingControlApp:
                 print(f"[AutoDetect] {car_clean} @ {track_clean}")
 
                 self.auto_fill_ui(car_clean, track_clean)
+                self.sync_overlay_manager()
 
                 # Create skeleton if doesn't exist
                 if car_clean not in self.saved_presets:
@@ -958,6 +967,8 @@ class iRacingControlApp:
             self.car_overlay_config[car]
         )
 
+        self.sync_overlay_manager()
+
         # Reload saved bindings/macros for this car/track so they remain active
         preset_data = self.saved_presets[car][track]
         if preset_data.get("tabs") or preset_data.get("combo"):
@@ -1063,66 +1074,6 @@ class iRacingControlApp:
 
         self.register_current_listeners()
 
-    def toggle_overlay(self):
-        """Toggle HUD overlay visibility."""
-        if self.overlay.winfo_viewable():
-            self.overlay.withdraw()
-            self.overlay_visible = False
-        else:
-            self.overlay.deiconify()
-            self.overlay_visible = True
-
-    def notify_overlay_status(self, text: str, color: str):
-        """Update overlay status text temporarily."""
-        self.ui(self.overlay.update_status_text, text, color)
-        self.ui(
-            self.root.after,
-            2000,
-            lambda: self.overlay.update_status_text("HUD Ready", "white")
-        )
-
-    def update_overlay_loop(self):
-        """Background loop to update HUD values."""
-        if self.overlay_visible:
-            data = {}
-            car = self.current_car or "Generic Car"
-            config = self.car_overlay_config.get(car, {})
-
-            for var_name, controller in self.controllers.items():
-                var_config = config.get(var_name, {})
-                if not var_config.get("show", False):
-                    continue
-                value = controller.read_telemetry()
-                data[var_name] = value
-
-            self.overlay.update_monitor_values(data)
-
-        self._update_overlay_feedback()
-
-        self.root.after(100, self.update_overlay_loop)
-
-    def _read_ir_value(self, key: str):
-        return self.overlay_feedback_manager._read_ir_value(key)
-
-    @staticmethod
-    def _safe_float(value: Any, default: float = 0.0) -> float:
-        return OverlayFeedbackManager._safe_float(value, default)
-
-    def _bool_from_keys(self, keys: List[str]) -> bool:
-        return self.overlay_feedback_manager._bool_from_keys(keys)
-
-    def _slip_values(self) -> List[float]:
-        return self.overlay_feedback_manager._slip_values()
-
-    def _push_overlay_alert(
-        self, message: str, color: str, cfg: Dict[str, float], now: float
-    ) -> None:
-        self.overlay_feedback_manager._push_overlay_alert(message, color, cfg, now)
-
-    def _update_overlay_feedback(self):
-        self.overlay_feedback_manager.update_feedback(
-            self.current_car, self.car_overlay_feedback, self.show_overlay_feedback.get()
-        )
 
     def open_timing_window(self):
         """Open timing configuration window."""
@@ -1147,6 +1098,8 @@ class iRacingControlApp:
     def load_config(self):
         """Load configuration from disk."""
         self.config_service.load()
+
+        self.sync_overlay_manager()
 
     def _set_voice_tuning_vars(self, tuning: Dict[str, Any]):
         self.voice_control.set_voice_tuning_vars(tuning)
@@ -1188,7 +1141,7 @@ class iRacingControlApp:
         """Ensure all controllers use the latest IRSDK handle."""
         for controller in self.controllers.values():
             controller.ir = self.ir
-        self.overlay_feedback_manager.set_ir(self.ir)
+        self.overlay_manager.set_ir(self.ir)
 
     def _clear_keyboard_hotkeys(self):
         self.voice_control.clear_keyboard_hotkeys()

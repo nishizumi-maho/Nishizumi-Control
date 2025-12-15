@@ -5275,6 +5275,7 @@ class iRacingControlApp:
         self.whisper_binary_path.set(path)
         self._update_voice_controls()
         self.register_current_listeners()
+        self.schedule_save()
 
     def choose_whisper_model(self):
         """Prompt the user to select a whisper.cpp model file."""
@@ -5288,6 +5289,7 @@ class iRacingControlApp:
         self.whisper_model_path.set(path)
         self._update_voice_controls()
         self.register_current_listeners()
+        self.schedule_save()
 
     def _update_voice_controls(self):
         """Refresh UI state and listener config for voice engine selection."""

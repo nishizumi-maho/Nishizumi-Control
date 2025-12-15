@@ -3617,9 +3617,8 @@ class iRacingControlApp:
             controller = self.controllers[var_name]
 
             for preset in config.get("presets", []):
-                bind = preset.get("bind")
                 val_str = preset.get("val")
-                if not bind or not val_str:
+                if not val_str:
                     continue
 
                 try:
@@ -3638,14 +3637,12 @@ class iRacingControlApp:
             combo_config = self.combo_tab.get_config()
 
             for preset in combo_config.get("presets", []):
-                bind = preset.get("bind")
-                if not bind:
-                    continue
-
                 values = preset.get("vals", {})
                 phrase = preset.get("voice_phrase", "").strip().lower()
-                if phrase:
-                    voice_phrases[phrase] = self._make_combo_action(values)
+                if not phrase:
+                    continue
+
+                voice_phrases[phrase] = self._make_combo_action(values)
 
         return voice_phrases
 
@@ -3684,7 +3681,7 @@ class iRacingControlApp:
             for preset in config.get("presets", []):
                 bind = preset.get("bind")
                 val_str = preset.get("val")
-                if not bind or not val_str:
+                if not val_str:
                     continue
 
                 try:
@@ -3693,12 +3690,13 @@ class iRacingControlApp:
                     continue
 
                 action = self._make_single_action(controller, target)
-                if bind.startswith("KEY:"):
-                    key_name = bind.split(":", 1)[1].lower()
-                    handle = keyboard.add_hotkey(key_name, action)
-                    self._hotkey_handles.append(handle)
-                else:
-                    input_manager.listeners[bind] = action
+                if bind:
+                    if bind.startswith("KEY:"):
+                        key_name = bind.split(":", 1)[1].lower()
+                        handle = keyboard.add_hotkey(key_name, action)
+                        self._hotkey_handles.append(handle)
+                    else:
+                        input_manager.listeners[bind] = action
 
                 phrase = preset.get("voice_phrase", "").strip().lower()
                 if phrase:
@@ -3710,18 +3708,16 @@ class iRacingControlApp:
 
             for preset in combo_config.get("presets", []):
                 bind = preset.get("bind")
-                if not bind:
-                    continue
-
                 values = preset.get("vals", {})
 
                 action = self._make_combo_action(values)
-                if bind.startswith("KEY:"):
-                    key_name = bind.split(":", 1)[1].lower()
-                    handle = keyboard.add_hotkey(key_name, action)
-                    self._hotkey_handles.append(handle)
-                else:
-                    input_manager.listeners[bind] = action
+                if bind:
+                    if bind.startswith("KEY:"):
+                        key_name = bind.split(":", 1)[1].lower()
+                        handle = keyboard.add_hotkey(key_name, action)
+                        self._hotkey_handles.append(handle)
+                    else:
+                        input_manager.listeners[bind] = action
 
                 phrase = preset.get("voice_phrase", "").strip().lower()
                 if phrase:

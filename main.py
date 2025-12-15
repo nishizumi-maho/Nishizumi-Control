@@ -675,17 +675,18 @@ class VoiceListener:
     def stop(self):
         self.running = False
 
-    def _recognize_text(self, audio) -> Optional[str]:
+    def _recognize_text(self, audio, recognizer=None) -> Optional[str]:
         """Try multiple engines to convert audio to text."""
-        if not self.recognizer:
+        rec = recognizer or self.recognizer
+        if not rec:
             return None
 
         engines = []
-        if hasattr(self.recognizer, "recognize_sapi"):
-            engines.append(self.recognizer.recognize_sapi)
-        if hasattr(self.recognizer, "recognize_sphinx"):
-            engines.append(self.recognizer.recognize_sphinx)
-        engines.append(self.recognizer.recognize_google)
+        if hasattr(rec, "recognize_sapi"):
+            engines.append(rec.recognize_sapi)
+        if hasattr(rec, "recognize_sphinx"):
+            engines.append(rec.recognize_sphinx)
+        engines.append(rec.recognize_google)
 
         for engine in engines:
             try:
@@ -734,9 +735,179 @@ class VoiceListener:
         except Exception as exc:
             print(f"[Voice] Listener stopped: {exc}")
 
+    def capture_once(
+        self,
+        timeout: float = 3.0,
+        phrase_time_limit: float = 4.0
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Capture a single voice input for testing purposes."""
+
+        if not self.available or sr is None:
+            return None, "Voice recognition not available."
+
+        recognizer = sr.Recognizer()
+
+        try:
+            with sr.Microphone() as source:
+                try:
+                    recognizer.adjust_for_ambient_noise(source, duration=0.4)
+                except Exception:
+                    pass
+
+                audio = recognizer.listen(
+                    source,
+                    timeout=timeout,
+                    phrase_time_limit=phrase_time_limit
+                )
+        except Exception as exc:  # noqa: BLE001
+            return None, str(exc)
+
+        text = self._recognize_text(audio, recognizer=recognizer)
+        if text is None:
+            return "", None
+
+        return text.strip().lower(), None
+
 
 voice_listener = VoiceListener()
 
+
+# ======================================================================
+# VOICE TEST DIALOG
+# ======================================================================
+class VoiceTestDialog(tk.Toplevel):
+    """Dialog for validating voice commands and macro triggers."""
+
+    def __init__(
+        self,
+        parent,
+        app,
+        phrases_map: Dict[str, Callable]
+    ):
+        super().__init__(parent)
+        self.app = app
+        self.phrases_map = {k.strip().lower(): v for k, v in phrases_map.items()}
+        self.title("Teste de Voz e Macros")
+        self.geometry("430x360")
+
+        info = tk.Label(
+            self,
+            text=(
+                "Fale uma das frases configuradas para acionar o macro.\n"
+                "Use o botão de teste para garantir que o microfone e as frases"
+                " estão funcionando."
+            ),
+            wraplength=400,
+            justify="left"
+        )
+        info.pack(padx=10, pady=(10, 6), anchor="w")
+
+        phrases_text = "\n".join(
+            f"• {phrase}" for phrase in sorted(self.phrases_map.keys())
+        ) or "Nenhuma frase configurada."
+
+        tk.Label(
+            self,
+            text="Frases disponíveis:",
+            font=("Arial", 10, "bold")
+        ).pack(anchor="w", padx=10)
+
+        tk.Message(
+            self,
+            text=phrases_text,
+            width=400
+        ).pack(fill="x", padx=10, pady=(0, 8))
+
+        self.status_var = tk.StringVar(value="Aguardando teste...")
+        self.heard_var = tk.StringVar(value="(nada ainda)")
+
+        self.btn_listen = tk.Button(
+            self,
+            text="🎤 Ouvir e testar",
+            command=self.start_listen,
+            bg="#ADD8E6"
+        )
+        self.btn_listen.pack(fill="x", padx=10, pady=4)
+
+        tk.Label(self, textvariable=self.status_var, fg="gray").pack(
+            anchor="w", padx=12
+        )
+        tk.Label(
+            self,
+            textvariable=self.heard_var,
+            font=("Arial", 10, "bold")
+        ).pack(anchor="w", padx=12, pady=(0, 8))
+
+        manual = tk.Frame(self)
+        manual.pack(fill="x", padx=10, pady=(6, 10))
+
+        tk.Label(manual, text="Executar frase manualmente:").pack(
+            anchor="w"
+        )
+        self.entry_manual = ttk.Entry(manual)
+        self.entry_manual.pack(fill="x", pady=2)
+        tk.Button(
+            manual,
+            text="Rodar macro",
+            command=self.run_manual_phrase,
+            bg="#90ee90"
+        ).pack(fill="x", pady=2)
+
+    def start_listen(self):
+        """Start a one-off listening test."""
+        self.btn_listen.config(state="disabled", text="Escutando...")
+        self.status_var.set("Fale agora o comando configurado...")
+        self.heard_var.set("(escutando)")
+        threading.Thread(target=self._listen_worker, daemon=True).start()
+
+    def _listen_worker(self):
+        phrase, error = voice_listener.capture_once()
+
+        def finalize():
+            self.btn_listen.config(state="normal", text="🎤 Ouvir e testar")
+            if error:
+                self.status_var.set(f"Erro ao ouvir: {error}")
+                return
+
+            if phrase is None:
+                self.status_var.set("Voz indisponível.")
+                return
+
+            normalized = phrase.strip()
+            self.heard_var.set(normalized or "(nada reconhecido)")
+
+            if not normalized:
+                self.status_var.set("Nenhuma frase foi reconhecida.")
+                return
+
+            triggered = self._trigger_phrase(normalized)
+            if triggered:
+                self.status_var.set("Macro acionado com sucesso!")
+            else:
+                self.status_var.set("Frase reconhecida, mas nenhum macro associado.")
+
+        self.after(0, finalize)
+
+    def _trigger_phrase(self, phrase: str) -> bool:
+        """Execute macro for the given phrase if available."""
+        action = self.phrases_map.get(phrase.strip().lower())
+        if not action:
+            return False
+
+        threading.Thread(target=action, daemon=True).start()
+        return True
+
+    def run_manual_phrase(self):
+        """Trigger macro manually from text input."""
+        phrase = self.entry_manual.get().strip().lower()
+        if not phrase:
+            self.status_var.set("Informe uma frase para testar.")
+            return
+
+        if self._trigger_phrase(phrase):
+            self.status_var.set("Macro executado manualmente.")
+        else:
+            self.status_var.set("Nenhum macro associado a essa frase.")
 
 # ======================================================================
 # DEVICE SELECTOR DIALOG
@@ -2426,6 +2597,7 @@ class iRacingControlApp:
         self.auto_detect = tk.BooleanVar(value=True)
         self.auto_restart_on_rescan = tk.BooleanVar(value=True)
         self.auto_restart_on_race = tk.BooleanVar(value=True)
+        self.voice_phrase_map: Dict[str, Callable] = {}
 
         # Load configuration
         self.load_config()
@@ -2547,6 +2719,13 @@ class iRacingControlApp:
             command=self.register_current_listeners
         )
         voice_check.pack(side="right", padx=6)
+
+        tk.Button(
+            settings_frame,
+            text="Testar Voz",
+            command=self.open_voice_test_dialog,
+            state=("normal" if HAS_SPEECH else "disabled")
+        ).pack(side="right", padx=4)
 
         if not HAS_SPEECH:
             tk.Label(
@@ -3395,6 +3574,102 @@ class iRacingControlApp:
         self.current_car = data.get("current_car", "")
         self.current_track = data.get("current_track", "")
 
+    # ------------------------------------------------------------------
+    # Voice helpers
+    # ------------------------------------------------------------------
+    def _make_single_action(self, controller: GenericController, target: float):
+        """Create an action that adjusts a single controller to a target."""
+        return lambda: threading.Thread(
+            target=controller.adjust_to_target,
+            args=(target,),
+            daemon=True
+        ).start()
+
+    def _make_combo_action(self, values: Dict[str, str]):
+        """Create an action that adjusts multiple controllers at once."""
+
+        def combo_action():
+            if self.app_state != "RUNNING":
+                return
+
+            for var_name, val_str in values.items():
+                if var_name in self.controllers and val_str:
+                    try:
+                        target = float(val_str)
+                    except Exception:
+                        continue
+
+                    ctrl = self.controllers[var_name]
+                    threading.Thread(
+                        target=ctrl.adjust_to_target,
+                        args=(target,),
+                        daemon=True
+                    ).start()
+
+        return combo_action
+
+    def _build_voice_phrase_map(self) -> Dict[str, Callable]:
+        """Collect current voice phrases mapped to their actions."""
+        voice_phrases: Dict[str, Callable] = {}
+
+        for var_name, tab in self.tabs.items():
+            config = tab.get_config()
+            controller = self.controllers[var_name]
+
+            for preset in config.get("presets", []):
+                bind = preset.get("bind")
+                val_str = preset.get("val")
+                if not bind or not val_str:
+                    continue
+
+                try:
+                    target = float(val_str)
+                except Exception:
+                    continue
+
+                phrase = preset.get("voice_phrase", "").strip().lower()
+                if phrase:
+                    voice_phrases[phrase] = self._make_single_action(
+                        controller,
+                        target
+                    )
+
+        if self.combo_tab:
+            combo_config = self.combo_tab.get_config()
+
+            for preset in combo_config.get("presets", []):
+                bind = preset.get("bind")
+                if not bind:
+                    continue
+
+                values = preset.get("vals", {})
+                phrase = preset.get("voice_phrase", "").strip().lower()
+                if phrase:
+                    voice_phrases[phrase] = self._make_combo_action(values)
+
+        return voice_phrases
+
+    def open_voice_test_dialog(self):
+        """Open the dialog that validates configured voice commands."""
+        if not HAS_SPEECH:
+            messagebox.showinfo(
+                "Voz indisponível",
+                "Instale a biblioteca 'speech_recognition' para usar voz."
+            )
+            return
+
+        phrases_map = self._build_voice_phrase_map()
+        self.voice_phrase_map = phrases_map
+
+        if not phrases_map:
+            messagebox.showinfo(
+                "Sem macros",
+                "Adicione frases nas abas para testar comandos de voz."
+            )
+            return
+
+        VoiceTestDialog(self.root, self, phrases_map)
+
     def register_current_listeners(self):
         """Register keyboard/joystick listeners based on current config."""
         self._clear_keyboard_hotkeys()
@@ -3417,14 +3692,7 @@ class iRacingControlApp:
                 except Exception:
                     continue
 
-                def make_action(ctrl=controller, tgt=target):
-                    return lambda: threading.Thread(
-                        target=ctrl.adjust_to_target,
-                        args=(tgt,),
-                        daemon=True
-                    ).start()
-
-                action = make_action()
+                action = self._make_single_action(controller, target)
                 if bind.startswith("KEY:"):
                     key_name = bind.split(":", 1)[1].lower()
                     handle = keyboard.add_hotkey(key_name, action)
@@ -3447,25 +3715,7 @@ class iRacingControlApp:
 
                 values = preset.get("vals", {})
 
-                def combo_action(vals=values):
-                    if self.app_state != "RUNNING":
-                        return
-
-                    for var_name, val_str in vals.items():
-                        if var_name in self.controllers and val_str:
-                            try:
-                                target = float(val_str)
-                            except Exception:
-                                continue
-
-                            ctrl = self.controllers[var_name]
-                            threading.Thread(
-                                target=ctrl.adjust_to_target,
-                                args=(target,),
-                                daemon=True
-                            ).start()
-
-                action = combo_action
+                action = self._make_combo_action(values)
                 if bind.startswith("KEY:"):
                     key_name = bind.split(":", 1)[1].lower()
                     handle = keyboard.add_hotkey(key_name, action)
@@ -3477,11 +3727,13 @@ class iRacingControlApp:
                 if phrase:
                     voice_phrases[phrase] = action
 
+        self.voice_phrase_map = voice_phrases or self._build_voice_phrase_map()
+
         input_manager.active = (self.app_state == "RUNNING")
         if self.app_state != "RUNNING":
             voice_listener.set_enabled(False)
         elif self.use_voice.get():
-            voice_listener.set_phrases(voice_phrases)
+            voice_listener.set_phrases(self.voice_phrase_map)
             voice_listener.set_enabled(True)
         else:
             voice_listener.set_enabled(False)

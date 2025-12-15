@@ -140,9 +140,15 @@ else:
 try:
     import vosk
     HAS_VOSK = True
-except ImportError:
+    _VOSK_IMPORT_ERROR = ""
+except (ImportError, FileNotFoundError, OSError) as exc:
     vosk = None
     HAS_VOSK = False
+    _VOSK_IMPORT_ERROR = str(exc)
+    print(
+        "Warning: 'vosk' could not be loaded (offline recognition disabled):"
+        f" {_VOSK_IMPORT_ERROR}"
+    )
 
 # ======================================================================
 # GLOBAL CONFIGURATION
@@ -5001,6 +5007,8 @@ class iRacingControlApp:
             return "Using Windows speech recognizer"
 
         if not HAS_VOSK:
+            if _VOSK_IMPORT_ERROR:
+                return f"Vosk unavailable: {_VOSK_IMPORT_ERROR}"
             return "Vosk not installed"
 
         model_path = self.vosk_model_path.get()

@@ -678,7 +678,7 @@ class VoiceListener:
         self.running = False
 
     def _recognize_text(self, audio, recognizer=None) -> Optional[str]:
-        """Convert audio to text using the Windows SAPI engine only."""
+        """Try multiple engines to convert audio to text."""
         rec = recognizer or self.recognizer
         if not rec:
             return None
@@ -699,10 +699,7 @@ class VoiceListener:
             except Exception:
                 continue
 
-        try:
-            return rec.recognize_sapi(audio)
-        except Exception:
-            return None
+        return None
 
     def _listen_loop(self):
         if not self.recognizer:
@@ -720,13 +717,22 @@ class VoiceListener:
                     except Exception:
                         pass
 
+                # Provide a slightly longer initial wait so the user can start
+                # speaking before the listener times out, then use a steady
+                # shorter timeout to avoid long blocking periods.
+                listen_timeout = 1.0
+
                 while self.running:
                     try:
                         audio = self.recognizer.listen(
                             source,
-                            timeout=0.5,
-                            phrase_time_limit=0.9
+                            timeout=listen_timeout,
+                            phrase_time_limit=1.2
                         )
+                        # After the first capture, keep a shorter timeout to
+                        # remain responsive while still avoiding premature
+                        # timeouts on slower environments.
+                        listen_timeout = 0.8
                     except getattr(sr, "WaitTimeoutError", Exception):
                         continue
                     except Exception:
@@ -750,8 +756,8 @@ class VoiceListener:
 
     def capture_once(
         self,
-        timeout: float = 0.5,
-        phrase_time_limit: float = 0.9
+        timeout: float = 1.0,
+        phrase_time_limit: float = 1.2
     ) -> Tuple[Optional[str], Optional[str]]:
         """Capture a single voice input for testing purposes."""
 

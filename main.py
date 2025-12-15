@@ -47,6 +47,7 @@ from dominant_control.config import (
     resolve_resource_path,
     restart_program,
 )
+from dominant_control.controller import GenericController
 from dominant_control.dependencies import (
     HAS_PYAUDIO,
     HAS_PYGAME,
@@ -60,16 +61,10 @@ from dominant_control.dependencies import (
 )
 from dominant_control.input_engine import (
     IS_WINDOWS,
-    _compute_timing,
-    _direct_pulse,
     _normalize_timing_config,
-    click_pulse,
-    press_key,
-    release_key,
 )
 from dominant_control.input_manager import input_manager
 from dominant_control.ui import GlobalTimingWindow
-from dominant_control.tts import speak_text
 from dominant_control.ui import DeviceSelector, OverlayWindow
 from dominant_control.voice import VoiceTestDialog, voice_listener
 from dominant_control.ui.overlay_config import OverlayConfigTab, ScrollableFrame
@@ -77,271 +72,396 @@ from dominant_control.ui.overlay_config import OverlayConfigTab, ScrollableFrame
 
 
 # ======================================================================
-# GENERIC CONTROLLER
+# SCROLLABLE FRAME WIDGET
 # ======================================================================
-class GenericController:
+class ScrollableFrame(tk.Frame):
     """
-    Controller for adjusting a single telemetry variable via key presses.
+    Frame with vertical scrollbar.
+    Use self.inner as the container for child widgets.
     """
 
-    def __init__(
-        self,
-        ir_instance,
-        var_name: str,
-        is_float: bool = False,
-        status_callback: Optional[Callable[[str, str], None]] = None,
-        app_ref=None
-    ):
-        self.ir = ir_instance
-        self.var_name = var_name
-        self.is_float = is_float
-        self.running_action = False
-        self.key_increase = None
-        self.key_decrease = None
-        self.update_status = status_callback
-        self.app = app_ref
+    def __init__(self, parent, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
 
-    def read_telemetry(self) -> Optional[float]:
-        """
-        Read current value of the controlled variable.
+        canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0)
+        scrollbar = tk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        self.inner = tk.Frame(canvas)
+
+        self.inner.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Mouse wheel support (bind only while hovered)
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        def _bind_mousewheel(_event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        def _unbind_mousewheel(_event):
+            canvas.unbind_all("<MouseWheel>")
+
+        canvas.bind("<Enter>", _bind_mousewheel)
+        canvas.bind("<Leave>", _unbind_mousewheel)
+
+class OverlayConfigTab(tk.Frame):
+    """
+    Configuration tab for HUD overlay appearance and variable display.
+    """
+
+    def __init__(self, parent, app):
+        super().__init__(parent)
+        self.app = app
+        self.var_rows: Dict[str, Dict[str, Any]] = {}
+
+        # Scrollable layout
+        scroll_frame = ScrollableFrame(self)
+        scroll_frame.pack(fill="both", expand=True)
+        self.body = scroll_frame.inner
+
+        # Header
+        tk.Label(
+            self.body,
+            text="HUD / Overlay Configuration",
+            font=("Arial", 11, "bold")
+        ).pack(anchor="w", pady=(5, 5))
+
+        # Global appearance settings
+        appearance_frame = tk.LabelFrame(self.body, text="Global HUD Appearance")
+        appearance_frame.pack(fill="x", padx=5, pady=5)
+
+        self.btn_bg = tk.Button(
+            appearance_frame, 
+            text="Background Color", 
+            command=self.pick_background_color
+        )
+        self.btn_bg.grid(row=0, column=0, padx=5, pady=5, sticky="w")
+
+        self.lbl_bg_preview = tk.Label(
+            appearance_frame, 
+            text="   ",
+            bg=self.app.overlay.style_cfg.get("bg", "black"),
+            relief="solid"
+        )
+        self.lbl_bg_preview.grid(row=0, column=1, padx=5, pady=5)
+
+        self.btn_fg = tk.Button(
+            appearance_frame, 
+            text="Text Color", 
+            command=self.pick_text_color
+        )
+        self.btn_fg.grid(row=1, column=0, padx=5, pady=5, sticky="w")
+
+        self.lbl_fg_preview = tk.Label(
+            appearance_frame,
+            text="ABC",
+            fg=self.app.overlay.style_cfg.get("fg", "white"),
+            bg="gray",
+            relief="solid"
+        )
+        self.lbl_fg_preview.grid(row=1, column=1, padx=5, pady=5)
+
+        tk.Label(appearance_frame, text="Font Size:").grid(
+            row=2, column=0, padx=5, sticky="w"
+        )
+        self.scale_font = tk.Scale(
+            appearance_frame, 
+            from_=8, 
+            to=24, 
+            orient="horizontal"
+        )
+        self.scale_font.set(self.app.overlay.style_cfg.get("font_size", 10))
+        self.scale_font.grid(row=2, column=1, padx=5, pady=5, sticky="we")
+
+        tk.Label(appearance_frame, text="Opacity:").grid(
+            row=3, column=0, padx=5, sticky="w"
+        )
+        self.scale_opacity = tk.Scale(
+            appearance_frame,
+            from_=0.1,
+            to=1.0,
+            resolution=0.05,
+            orient="horizontal"
+        )
+        self.scale_opacity.set(self.app.overlay.style_cfg.get("opacity", 0.85))
+        self.scale_opacity.grid(row=3, column=1, padx=5, pady=5, sticky="we")
+
+        for i in range(2):
+            appearance_frame.columnconfigure(i, weight=1)
+
+        feedback_frame = tk.LabelFrame(
+            self.body, text="Assist Feedback Thresholds (per car)"
+        )
+        feedback_frame.pack(fill="x", padx=5, pady=5)
+
+        tk.Checkbutton(
+            feedback_frame,
+            text="Show ABS / TC / slip hints on the HUD",
+            variable=self.app.show_overlay_feedback,
+            command=self._on_feedback_toggle,
+        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=5, pady=(4, 6))
+
+        self.feedback_vars = {
+            "abs_hold_s": tk.DoubleVar(value=DEFAULT_OVERLAY_FEEDBACK["abs_hold_s"]),
+            "tc_hold_s": tk.DoubleVar(value=DEFAULT_OVERLAY_FEEDBACK["tc_hold_s"]),
+            "wheelspin_slip": tk.DoubleVar(
+                value=DEFAULT_OVERLAY_FEEDBACK["wheelspin_slip"]
+            ),
+            "wheelspin_hold_s": tk.DoubleVar(
+                value=DEFAULT_OVERLAY_FEEDBACK["wheelspin_hold_s"]
+            ),
+            "lockup_slip": tk.DoubleVar(value=DEFAULT_OVERLAY_FEEDBACK["lockup_slip"]),
+            "lockup_hold_s": tk.DoubleVar(value=DEFAULT_OVERLAY_FEEDBACK["lockup_hold_s"]),
+            "cooldown_s": tk.DoubleVar(value=DEFAULT_OVERLAY_FEEDBACK["cooldown_s"]),
+        }
+        self.feedback_entries: Dict[str, tk.Entry] = {}
+
+        feedback_rows = [
+            ("ABS active longer than (s)", "abs_hold_s"),
+            ("TC active longer than (s)", "tc_hold_s"),
+            ("Wheelspin slip (ratio)", "wheelspin_slip"),
+            ("Wheelspin duration (s)", "wheelspin_hold_s"),
+            ("Lock-up slip (negative value)", "lockup_slip"),
+            ("Lock-up duration (s)", "lockup_hold_s"),
+            ("Cooldown between alerts (s)", "cooldown_s"),
+        ]
+
+        for idx, (label, key) in enumerate(feedback_rows, start=1):
+            tk.Label(feedback_frame, text=label).grid(
+                row=idx, column=0, padx=5, pady=2, sticky="w"
+            )
+            entry = tk.Entry(feedback_frame, width=10, textvariable=self.feedback_vars[key])
+            entry.grid(row=idx, column=1, padx=5, pady=2, sticky="w")
+            entry.bind("<FocusOut>", self._on_feedback_change)
+            entry.bind("<KeyRelease>", self._on_feedback_change)
+            self.feedback_entries[key] = entry
+
+        self._set_feedback_fields_enabled(self.app.show_overlay_feedback.get())
+
+        tk.Button(
+            appearance_frame,
+            text="Apply Style",
+            command=self.apply_style,
+            bg="#90ee90"
+        ).grid(row=4, column=0, columnspan=2, sticky="we", padx=5, pady=(5, 5))
+
+        # Variable selection (per-car)
+        variables_frame = tk.LabelFrame(
+            self.body, 
+            text="Variables to Display (per car)"
+        )
+        variables_frame.pack(fill="both", expand=True, padx=5, pady=5)
+
+        header = tk.Frame(variables_frame)
+        header.pack(fill="x", pady=(3, 3))
         
-        Returns:
-            Current value or None if unavailable
+        tk.Label(header, text="Show", width=8, anchor="w").pack(
+            side="left", padx=2
+        )
+        tk.Label(header, text="Internal Name", width=25, anchor="w").pack(
+            side="left", padx=2
+        )
+        tk.Label(header, text="HUD Label", width=20, anchor="w").pack(
+            side="left", padx=2
+        )
+
+        self.variables_list_frame = tk.Frame(variables_frame)
+        self.variables_list_frame.pack(fill="both", expand=True)
+
+        tk.Label(
+            self.body,
+            text="Variable selections and labels are saved per car.\n"
+                 "Appearance settings apply to all cars.",
+            fg="gray",
+            font=("Arial", 8)
+        ).pack(anchor="w", padx=5, pady=(3, 10))
+
+    def pick_background_color(self):
+        """Open color picker for background color."""
+        color = colorchooser.askcolor(title="Background Color")[1]
+        if color:
+            self.app.overlay.style_cfg["bg"] = color
+            self.lbl_bg_preview.config(bg=color)
+            self.apply_style()
+
+    def pick_text_color(self):
+        """Open color picker for text color."""
+        color = colorchooser.askcolor(title="Text Color")[1]
+        if color:
+            self.app.overlay.style_cfg["fg"] = color
+            self.lbl_fg_preview.config(fg=color)
+            self.apply_style()
+
+    def apply_style(self):
+        """Apply current style settings to overlay."""
+        self.app.overlay.style_cfg["font_size"] = int(self.scale_font.get())
+        self.app.overlay.style_cfg["opacity"] = float(self.scale_opacity.get())
+        self.app.overlay.apply_style(self.app.overlay.style_cfg)
+        self.app.save_config()
+
+    def load_for_car(
+        self, 
+        car_name: str, 
+        var_list: List[Tuple[str, bool]], 
+        overlay_config: Dict[str, Dict[str, Any]]
+    ):
         """
-        try:
-            if not getattr(self.ir, "is_initialized", False):
-                try:
-                    self.ir.startup()
-                except Exception:
-                    return None
-                    
-            value = self.ir[self.var_name]
-            if value is None:
-                return None
-                
-            if self.is_float:
-                return float(value)
-            else:
-                return int(round(value))
-        except Exception:
-            return None
-
-    def _detect_float_step(self) -> Optional[float]:
-        """Detect the minimal float increment by pulsing once and restoring."""
-        if not self.is_float:
-            return None
-        if not self.key_increase or not self.key_decrease:
-            return None
-
-        baseline = self.read_telemetry()
-        if baseline is None:
-            return None
-
-        # Pulse upward and measure the delta
-        click_pulse(self.key_increase, is_float=True)
-        time.sleep(0.08)
-        raised = self.read_telemetry()
-
-        if raised is None:
-            return None
-
-        step = abs(float(raised) - float(baseline))
-
-        # Try to return near the starting point
-        click_pulse(self.key_decrease, is_float=True)
-        time.sleep(0.08)
-
-        if step < 1e-6:
-            return None
-
-        return step
-
-    def _resolve_target(self, target: float) -> float:
-        """Align float targets to the nearest reachable increment when needed."""
-        if not self.is_float:
-            return target
-
-        step = self._detect_float_step()
-        current = self.read_telemetry()
-
-        if step is None or step <= 0 or current is None:
-            return target
-
-        aligned = current + round((target - current) / step) * step
-
-        if abs(aligned - target) >= 0.0005:
-            if self.update_status:
-                self.update_status(f"Rounded to {aligned:.3f}", "orange")
-            if self.app:
-                short_name = self.var_name.replace("dc", "")
-                self.app.notify_overlay_status(
-                    f"{short_name}: using {aligned:.3f} (nearest)",
-                    "orange"
-                )
-
-        return aligned
-
-    def adjust_to_target(self, target: float):
-        """
-        Adjust variable to target value using discrete key presses.
+        Load HUD configuration for a specific car.
         
         Args:
-            target: Target value to reach
+            car_name: Name of the car
+            var_list: List of (var_name, is_float) tuples
+            overlay_config: Dict of var_name -> {"show": bool, "label": str}
         """
-        if self.running_action:
-            return
+        self._load_feedback_for_car(car_name)
 
-        if not self.key_increase or not self.key_decrease:
-            if self.update_status:
-                self.update_status("No keys configured", "red")
-            if self.app:
-                self.app.notify_overlay_status(
-                    f"{self.var_name.replace('dc', '')}: No keys", 
-                    "red"
-                )
-            return
+        # Rebuild variable rows
+        for child in self.variables_list_frame.winfo_children():
+            child.destroy()
+        self.var_rows.clear()
 
-        self.running_action = True
-        short_name = self.var_name.replace("dc", "")
+        # Ensure all variables have config entries
+        for var_name, _is_float in var_list:
+            if var_name not in overlay_config:
+                overlay_config[var_name] = {
+                    "show": False,
+                    "label": var_name.replace("dc", "")
+                }
 
-        target = self._resolve_target(target)
-        if not self.is_float:
-            target = int(round(target))
+        # Create UI rows
+        for var_name, _is_float in var_list:
+            config = overlay_config.get(var_name, {})
 
-        if self.update_status:
-            self.update_status("Adjusting...", "orange")
-        if self.app:
-            self.app.notify_overlay_status(
-                f"Adjusting {short_name} -> {target}",
-                "orange"
+            row = tk.Frame(self.variables_list_frame)
+            row.pack(fill="x", pady=2)
+
+            show_var = tk.BooleanVar(value=config.get("show", False))
+            checkbox = tk.Checkbutton(row, variable=show_var)
+            checkbox.pack(side="left", padx=2)
+
+            tk.Label(row, text=var_name, width=25, anchor="w").pack(
+                side="left", padx=2
             )
 
-        timeout = time.time() + 8
-        success = False
+            label_entry = tk.Entry(row, width=20)
+            label_entry.pack(side="left", padx=2)
+            label_entry.insert(
+                0,
+                config.get("label") or var_name.replace("dc", "")
+            )
 
-        try:
-            while time.time() < timeout:
-                # Abort if entering CONFIG mode
-                if self.app and self.app.app_state != "RUNNING":
-                    break
+            self.var_rows[var_name] = {
+                "show_var": show_var,
+                "entry": label_entry
+            }
 
-                current = self.read_telemetry()
-                if current is None:
-                    break
+            show_var.trace_add(
+                "write",
+                lambda *_args, vn=var_name: self._on_overlay_row_change(vn)
+            )
+            label_entry.bind(
+                "<KeyRelease>",
+                lambda _event, vn=var_name: self._on_overlay_row_change(vn)
+            )
 
-                diff = target - current
-                abs_diff = abs(diff)
+        self.app.car_overlay_config[car_name] = overlay_config
+        self._collect_feedback_for_car(car_name)
+        self.app.overlay.rebuild_monitor(overlay_config)
+        self.app.save_config()
 
-                # Check if target reached
-                if self.is_float and abs_diff < 0.001:
-                    success = True
-                    break
-                if not self.is_float and diff == 0:
-                    success = True
-                    break
+    def _on_feedback_change(self, *_args):
+        """Persist feedback edits and save lazily."""
 
-                # Press appropriate key
-                key = self.key_increase if diff > 0 else self.key_decrease
-                click_pulse(key, self.is_float)
-                time.sleep(0.02)
+        car = self.app.current_car or "Generic Car"
+        self._collect_feedback_for_car(car)
+        self.app.schedule_save()
 
-        except Exception as e:
-            print(f"[GenericController] Exception: {e}")
-        finally:
-            if success:
-                message = f"{short_name} OK ({target})"
-                if self.update_status:
-                    self.update_status("Ready", "green")
-                if self.app:
-                    self.app.notify_overlay_status(message, "green")
-                    if self.app.use_tts.get():
-                        speak_text(message)
-            else:
-                status = "Cancelled" if (
-                    self.app and self.app.app_state != "RUNNING"
-                ) else "Failed"
-                
-                if self.update_status:
-                    self.update_status(status, "red")
-                if self.app:
-                    status_msg = (
-                        f"{short_name} Cancelled" 
-                        if self.app.app_state != "RUNNING" 
-                        else f"{short_name} Failed"
-                    )
-                    self.app.notify_overlay_status(status_msg, "red")
+    def _on_feedback_toggle(self):
+        """Enable or disable assist hints and persist the preference."""
 
-            self.running_action = False
+        self._set_feedback_fields_enabled(self.app.show_overlay_feedback.get())
+        self._on_feedback_change()
 
-    def find_minimum_effective_timing(
-        self,
-        start_ms: int = 1,
-        max_ms: int = 120,
-        step_ms: int = 1,
-        settle_s: float = 0.05,
-        confirmation_attempts: int = 2
-    ) -> Optional[int]:
+    def _set_feedback_fields_enabled(self, enabled: bool) -> None:
+        """Toggle entry state for assist thresholds."""
+
+        state = "normal" if enabled else "disabled"
+        for entry in self.feedback_entries.values():
+            try:
+                entry.config(state=state)
+            except Exception:
+                continue
+
+    def _on_overlay_row_change(self, var_name: str):
+        """Apply live updates when overlay rows change."""
+        car = self.app.current_car or "Generic Car"
+        config = self.app.car_overlay_config.get(car, {})
+        row = self.var_rows.get(var_name)
+        if not row:
+            return
+
+        show = row["show_var"].get()
+        label = row["entry"].get().strip() or var_name.replace("dc", "")
+        config[var_name] = {"show": show, "label": label}
+        self.app.car_overlay_config[car] = config
+        self.app.overlay.rebuild_monitor(config)
+        self.app.schedule_save()
+
+    def collect_for_car(self, car_name: str) -> Dict[str, Dict[str, Any]]:
         """
-        Probe the minimal pulse timing that reliably updates telemetry.
-
-        The probe fires fast pulses starting at ``start_ms`` and increments by
-        ``step_ms`` until telemetry reflects a change. The first timing that
-        consistently registers is returned.
-
+        Collect current HUD configuration for a car.
+        
         Args:
-            start_ms: Initial press/interval duration in milliseconds.
-            max_ms: Maximum duration to test in milliseconds.
-            step_ms: Increment between attempts in milliseconds.
-            settle_s: Delay after a pulse to allow telemetry to settle.
-            confirmation_attempts: Number of retries per timing bucket.
-
+            car_name: Name of the car
+            
         Returns:
-            Suggested minimal working pulse duration in milliseconds, or None
-            if no timing within bounds registers.
+            Dict of var_name -> {"show": bool, "label": str}
         """
-        if not self.key_increase or not self.key_decrease:
-            raise ValueError("Increase/decrease keys must be configured before probing.")
+        config = self.app.car_overlay_config.get(car_name, {})
 
-        baseline = self.read_telemetry()
-        if baseline is None:
-            return None
+        for var_name, row_config in self.var_rows.items():
+            show = row_config["show_var"].get()
+            label = row_config["entry"].get().strip() or var_name.replace("dc", "")
+            config[var_name] = {"show": show, "label": label}
 
-        def _changed(old, new) -> bool:
-            if old is None or new is None:
-                return False
-            if self.is_float:
-                return abs(float(new) - float(old)) >= 0.0005
-            return int(round(new)) != int(round(old))
+        self.app.car_overlay_config[car_name] = config
+        self._collect_feedback_for_car(car_name)
+        self.app.overlay.rebuild_monitor(config)
+        return config
 
-        def _restore(target_value: float, timing_ms: int):
-            """Attempt to revert telemetry back near baseline after a test."""
-            for _ in range(5):
-                current = self.read_telemetry()
-                if current is None:
-                    break
-                if not _changed(target_value, current):
-                    break
-                direction = self.key_decrease if current > target_value else self.key_increase
-                _direct_pulse(direction, timing_ms, timing_ms)
-                time.sleep(settle_s)
+    def _load_feedback_for_car(self, car_name: str) -> None:
+        """Load per-car feedback thresholds into the UI fields."""
 
-        for delay_ms in range(max(1, start_ms), max_ms + 1, max(1, step_ms)):
-            success_count = 0
-            for _ in range(max(1, confirmation_attempts)):
-                _direct_pulse(self.key_increase, delay_ms, delay_ms)
-                time.sleep(settle_s)
-                updated = self.read_telemetry()
-                if _changed(baseline, updated):
-                    success_count += 1
-                else:
-                    break
+        cfg = DEFAULT_OVERLAY_FEEDBACK.copy()
+        cfg.update(self.app.car_overlay_feedback.get(car_name, {}))
 
-            _restore(baseline, delay_ms)
+        for key, var in self.feedback_vars.items():
+            try:
+                var.set(float(cfg.get(key, DEFAULT_OVERLAY_FEEDBACK[key])))
+            except Exception:
+                var.set(DEFAULT_OVERLAY_FEEDBACK[key])
 
-            if success_count >= confirmation_attempts:
-                return delay_ms
+        self._set_feedback_fields_enabled(self.app.show_overlay_feedback.get())
 
-        return None
+    def _collect_feedback_for_car(self, car_name: str) -> Dict[str, float]:
+        """Persist feedback thresholds from UI fields for a car."""
+
+        cfg: Dict[str, float] = DEFAULT_OVERLAY_FEEDBACK.copy()
+        for key, var in self.feedback_vars.items():
+            try:
+                cfg[key] = float(var.get())
+            except Exception:
+                cfg[key] = DEFAULT_OVERLAY_FEEDBACK[key]
+
+        self.app.car_overlay_feedback[car_name] = cfg
+        return cfg
 
 
 # ======================================================================

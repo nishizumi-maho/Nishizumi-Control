@@ -111,18 +111,26 @@ def _prepare_vosk_env() -> Optional[str]:
 
     candidates = []
 
+    # Explicit overrides take precedence
+    env_override = os.environ.get("VOSK_DLL_PATH")
+    if env_override:
+        candidates.append(env_override)
+
+    # PyInstaller bundle temp directory
     if getattr(sys, "_MEIPASS", None):
         candidates.append(os.path.join(sys._MEIPASS, "vosk"))
         candidates.append(sys._MEIPASS)
 
+    # Directory next to the frozen executable
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.abspath(os.path.dirname(sys.executable))
+        candidates.append(os.path.join(exe_dir, "vosk"))
+        candidates.append(exe_dir)
+
+    # Source checkout or unbundled execution
     current_dir = os.path.abspath(os.path.dirname(__file__))
-    candidates.extend(
-        [
-            os.environ.get("VOSK_DLL_PATH"),
-            os.path.join(current_dir, "vosk"),
-            current_dir,
-        ]
-    )
+    candidates.append(os.path.join(current_dir, "vosk"))
+    candidates.append(current_dir)
 
     selected: Optional[str] = None
     for path in candidates:

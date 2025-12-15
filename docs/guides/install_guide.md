@@ -36,13 +36,22 @@ This guide walks through installing Dominant Control, enabling every option, and
 7. **Timing profile:** select Aggressive, Casual, Relaxed, or configure **Custom** press/hold timings.
 8. **Save profile:** enter car and track names and click **Save Current**. Profiles auto-load on match.
 
-## 4. Vosk Voice Command Setup
-1. Install voice dependencies (already in `requirements.txt`): `vosk`, `SpeechRecognition`, `pyaudio`.
+## 4. Voice Command Engines (Vosk or Whisper)
+You can run voice commands with either Vosk (lightweight) or Whisper (higher accuracy, can use GPU). Install dependencies from `requirements.txt` first.
+
+### A) Vosk Setup (CPU-friendly)
+1. Install voice dependencies: `vosk`, `SpeechRecognition`, `pyaudio`.
 2. Download a Vosk English model (e.g., `vosk-model-small-en-us-0.15`) from [alphacephei.com/vosk/models](https://alphacephei.com/vosk/models).
 3. Extract the model folder to a stable path (e.g., `C:\vosk\vosk-model-small-en-us-0.15`).
-4. In the app settings, set **Vosk model path** to the extracted folder.
+4. In the app settings, set **Vosk model path** to the extracted folder and pick **Vosk** as the voice engine.
 5. Enable **Voice Commands** and test phrases like “Brake bias up” or “Traction control preset two.”
-6. Use a quieter environment or push-to-talk if background noise triggers commands.
+
+### B) Whisper Setup (accuracy-focused, optional GPU)
+1. Ensure `faster-whisper` is installed (included in `requirements.txt`).
+2. Download a CTranslate2 Whisper model from the [faster-whisper collection](https://huggingface.co/collections/Systran/faster-whisper-655b5dd2959f16f30bdd5e23) — start with **tiny**/**base** for CPU or **small**/**medium**/**large-v2** if you have GPU headroom.
+3. Extract the model folder somewhere stable (e.g., `C:\whisper\faster-whisper-small`). The folder should contain `model.bin` and tokenizer files.
+4. In the app, set the voice engine to **Whisper**, click **Select Whisper model folder**, and point to the extracted folder.
+5. Enable **Voice Commands** and test your phrases. If recognition lags, try a smaller model or keep the model on a faster drive.
 
 ## 5. Feature-by-Feature Guide
 - **CONFIG / RUNNING Modes:** configure in CONFIG, drive in RUNNING. The mode button clearly shows the active state.

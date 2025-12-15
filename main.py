@@ -14,518 +14,68 @@ All Rights Reserved
 Version: 1.0.0
 """
 
-import tkinter as tk
-from tkinter import ttk, messagebox, colorchooser, filedialog
+import json
+import numbers
+import os
+import queue
+import random
+import sys
+import tempfile
+import threading
 import time
-import ctypes
+import wave
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
 import keyboard
 import irsdk
-import json
-import os
-import sys
-import random
-import warnings
-import threading
-import subprocess
-import importlib
-import queue
-import numbers
-import tempfile
-import wave
-from typing import Dict, List, Tuple, Optional, Any, Callable
+import tkinter as tk
+from tkinter import colorchooser, filedialog, messagebox, ttk
 
-# ======================================================================
-# WATCHDOG UTILITY
-# ======================================================================
-
-
-class Watchdog:
-    """Simple watchdog to monitor heartbeats and run recovery callbacks."""
-
-    def __init__(
-        self,
-        name: str,
-        *,
-        interval_s: float = 2.0,
-        timeout_s: float = 6.0,
-        on_trip: Optional[Callable[[], None]] = None
-    ):
-        self.name = name
-        self.interval_s = max(0.5, interval_s)
-        self.timeout_s = max(self.interval_s, timeout_s)
-        self.on_trip = on_trip
-        self._last_heartbeat = time.time()
-        self._stop_event = threading.Event()
-        self._thread: Optional[threading.Thread] = None
-
-    def beat(self):
-        """Record a heartbeat from the monitored worker."""
-
-        self._last_heartbeat = time.time()
-
-    def start(self):
-        """Start the watchdog monitor thread."""
-
-        if self._thread and self._thread.is_alive():
-            return
-
-        if self._stop_event.is_set():
-            self._stop_event = threading.Event()
-
-        self._last_heartbeat = time.time()
-        self._thread = threading.Thread(
-            target=self._run, name=f"{self.name}-watchdog", daemon=True
-        )
-        self._thread.start()
-
-    def stop(self):
-        """Stop monitoring."""
-
-        self._stop_event.set()
-
-    def _run(self):
-        while not self._stop_event.wait(self.interval_s):
-            elapsed = time.time() - self._last_heartbeat
-            if elapsed <= self.timeout_s:
-                continue
-
-            try:
-                if self.on_trip:
-                    self.on_trip()
-            except Exception as exc:  # noqa: PERF203
-                print(f"[Watchdog:{self.name}] Recovery failed: {exc}")
-
-            self._last_heartbeat = time.time()
-
-# ======================================================================
-# WARNING SUPPRESSION
-# ======================================================================
-warnings.filterwarnings(
-    "ignore",
-    message="pkg_resources is deprecated as an API.*"
+from dominant_control.config import (
+    APP_FOLDER,
+    APP_NAME,
+    APP_VERSION,
+    CONFIG_FILE,
+    CONFIG_FOLDER,
+    DEFAULT_OVERLAY_FEEDBACK,
+    GLOBAL_TIMING,
+    ICON_CANDIDATES,
+    PENDING_SCAN_FILE,
+    TTS_OUTPUT_DEVICE_INDEX,
+    TTS_STATE,
+    VOICE_TUNING_DEFAULTS,
+    _TTS_ENGINE,
+    _TTS_LOCK,
+    _TTS_QUEUE,
+    _TTS_THREAD,
+    apply_app_icon,
+    consume_pending_scan,
+    mark_pending_scan,
+    resolve_resource_path,
+    restart_program,
 )
-
-# Optional dependencies
-try:
-    import pygame
-    HAS_PYGAME = True
-except ImportError:
-    HAS_PYGAME = False
-    print("Warning: 'pygame' not installed. Joystick support disabled.")
-
-try:
-    import pyttsx3
-    HAS_TTS = True
-except ImportError:
-    HAS_TTS = False
-    print("Warning: 'pyttsx3' not installed. TTS disabled.")
-
-try:
-    import pyaudio
-    HAS_PYAUDIO = True
-except ImportError:
-    pyaudio = None
-    HAS_PYAUDIO = False
-    print("Warning: 'pyaudio' not installed. Audio device selection limited.")
-
-_speech_spec = importlib.util.find_spec("speech_recognition")
-if _speech_spec is not None:
-    import speech_recognition as sr
-    HAS_SPEECH = True
-else:
-    sr = None
-    HAS_SPEECH = False
-    print("Warning: 'speech_recognition' not installed. Voice triggers disabled.")
-
-try:
-    import vosk
-    HAS_VOSK = True
-    _VOSK_IMPORT_ERROR = ""
-except (ImportError, FileNotFoundError, OSError) as exc:
-    vosk = None
-    HAS_VOSK = False
-    _VOSK_IMPORT_ERROR = str(exc)
-    print(
-        "Warning: 'vosk' could not be loaded (offline recognition disabled):"
-        f" {_VOSK_IMPORT_ERROR}"
-    )
-
-# ======================================================================
-# GLOBAL CONFIGURATION
-# ======================================================================
-APP_NAME = "DominantControl"
-APP_VERSION = "3.0.0"
-APP_FOLDER = "DominantControl"
-BASE_PATH = os.getenv("APPDATA") or os.path.expanduser("~")
-CONFIG_FOLDER = os.path.join(BASE_PATH, APP_FOLDER, "configs")
-os.makedirs(CONFIG_FOLDER, exist_ok=True)
-CONFIG_FILE = os.path.join(CONFIG_FOLDER, "config_v3.json")
-PENDING_SCAN_FILE = os.path.join(CONFIG_FOLDER, "pending_scan.flag")
-ICON_CANDIDATES = ["DominantControl.ico", "DominantControl.png", "app.ico", "app.png"]
-
-
-def resolve_resource_path(filename: str) -> Optional[str]:
-    """Return the first existing path for a bundled or local resource."""
-
-    possible_roots = [
-        getattr(sys, "_MEIPASS", None),
-        os.path.dirname(sys.argv[0]),
-        os.path.abspath(os.path.dirname(__file__)),
-    ]
-
-    for root in possible_roots:
-        if not root:
-            continue
-        candidate = os.path.join(root, filename)
-        if os.path.exists(candidate):
-            return candidate
-
-    return None
-
-
-def apply_app_icon(root: tk.Tk) -> None:
-    """Set the window icon to the packaged icon when available."""
-
-    for icon_name in ICON_CANDIDATES:
-        icon_path = resolve_resource_path(icon_name)
-        if not icon_path:
-            continue
-
-        try:
-            if icon_path.lower().endswith(".ico"):
-                root.iconbitmap(icon_path)
-            else:
-                image = tk.PhotoImage(file=icon_path)
-                root.iconphoto(True, image)
-                root._icon_ref = image  # Prevent garbage collection
-            return
-        except Exception as exc:  # noqa: PERF203
-            print(f"[ICON] Failed to load {icon_path}: {exc}")
-
-
-# Overlay feedback defaults (per-car thresholds)
-DEFAULT_OVERLAY_FEEDBACK = {
-    "abs_hold_s": 0.35,
-    "tc_hold_s": 0.35,
-    "wheelspin_slip": 0.18,
-    "wheelspin_hold_s": 0.25,
-    "lockup_slip": 0.2,
-    "lockup_hold_s": 0.25,
-    "cooldown_s": 6.0
-}
-
-# Timing profiles for input simulation (click-click timing)
-GLOBAL_TIMING = {
-    "profile": "aggressive",  # "aggressive", "casual", "relaxed", "custom", "bot"
-    # Custom profile settings:
-    "press_min_ms": 60,
-    "press_max_ms": 80,
-    "interval_min_ms": 60,
-    "interval_max_ms": 90,
-    "random_enabled": False,
-    "random_range_ms": 10
-}
-
-# TTS cooldown to prevent spam
-TTS_STATE = {
-    "last_text": "",
-    "last_time": 0.0,
-    "cooldown_s": 1.2
-}
-
-# Shared TTS resources (initialized lazily to avoid startup overhead)
-_TTS_ENGINE = None
-_TTS_THREAD: Optional[threading.Thread] = None
-_TTS_QUEUE: "queue.Queue[str]" = queue.Queue()
-_TTS_LOCK = threading.Lock()
-TTS_OUTPUT_DEVICE_INDEX: Optional[int] = None
-
-# Voice tuning defaults (speech recognition responsiveness/accuracy)
-VOICE_TUNING_DEFAULTS = {
-    "ambient_duration": 0.2,        # Time to calibrate ambient noise
-    "initial_timeout": 1.0,         # First listen timeout (seconds)
-    "continuous_timeout": 0.8,      # Subsequent listen timeout (seconds)
-    "phrase_time_limit": 1.2,       # Max length of each phrase (seconds)
-    "energy_threshold": None,       # Static mic threshold (None = auto)
-    "dynamic_energy": True          # Auto-adjust mic threshold
-}
-
-# Initialize config file if it doesn't exist
-if not os.path.exists(CONFIG_FILE):
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        f.write("{}")
-
-
-def restart_program():
-    """Restart the application by closing and relaunching the process."""
-    python = sys.executable
-    script = os.path.abspath(sys.argv[0])
-    args = [python, script, *sys.argv[1:]]
-
-    try:
-        subprocess.Popen(args, cwd=os.getcwd(), env=os.environ.copy())
-    except Exception as exc:
-        print(f"[Restart] Failed to spawn new process: {exc}")
-
-    try:
-        root = tk._default_root
-        if root is not None:
-            root.quit()
-            root.destroy()
-    except Exception:
-        pass
-
-    # Ensure the current process exits so the window fully closes
-    os._exit(0)
-
-
-def mark_pending_scan():
-    """Persist a marker so the next launch triggers a rescan."""
-    try:
-        with open(PENDING_SCAN_FILE, "w", encoding="utf-8") as flag:
-            flag.write("rescan")
-    except Exception as exc:
-        print(f"[PendingScan] Failed to persist marker: {exc}")
-
-
-def consume_pending_scan() -> bool:
-    """Return True if a persisted rescan marker was present and clear it."""
-    if not os.path.exists(PENDING_SCAN_FILE):
-        return False
-
-    try:
-        os.remove(PENDING_SCAN_FILE)
-    except Exception as exc:
-        print(f"[PendingScan] Failed to clear marker: {exc}")
-
-    return True
-
-
-# ======================================================================
-# LOW-LEVEL INPUT ENGINE (CTYPES)
-# ======================================================================
-IS_WINDOWS = os.name == "nt" and hasattr(ctypes, "windll")
-
-if IS_WINDOWS:
-    SendInput = ctypes.windll.user32.SendInput
-else:
-    SendInput = None
-    print("Warning: Windows SendInput APIs unavailable; input injection disabled.")
-
-PUL = ctypes.POINTER(ctypes.c_ulong)
-
-
-class KeyBdInput(ctypes.Structure):
-    """Keyboard input structure for SendInput."""
-    _fields_ = [
-        ("wVk", ctypes.c_ushort),
-        ("wScan", ctypes.c_ushort),
-        ("dwFlags", ctypes.c_ulong),
-        ("time", ctypes.c_ulong),
-        ("dwExtraInfo", PUL)
-    ]
-
-
-class HardwareInput(ctypes.Structure):
-    """Hardware input structure for SendInput."""
-    _fields_ = [
-        ("uMsg", ctypes.c_ulong),
-        ("wParamL", ctypes.c_ushort),
-        ("wParamH", ctypes.c_ushort)
-    ]
-
-
-class MouseInput(ctypes.Structure):
-    """Mouse input structure for SendInput."""
-    _fields_ = [
-        ("dx", ctypes.c_long),
-        ("dy", ctypes.c_long),
-        ("mouseData", ctypes.c_ulong),
-        ("dwFlags", ctypes.c_ulong),
-        ("time", ctypes.c_ulong),
-        ("dwExtraInfo", PUL)
-    ]
-
-
-class Input_I(ctypes.Union):
-    """Union of input types."""
-    _fields_ = [
-        ("ki", KeyBdInput),
-        ("mi", MouseInput),
-        ("hi", HardwareInput)
-    ]
-
-
-class Input(ctypes.Structure):
-    """Input structure for SendInput."""
-    _fields_ = [
-        ("type", ctypes.c_ulong),
-        ("ii", Input_I)
-    ]
-
-
-def press_key(scan_code: int):
-    """
-    Press a key using its scan code.
-
-    Args:
-        scan_code: The keyboard scan code to press
-    """
-    if SendInput is None:
-        raise OSError("SendInput APIs are only available on Windows platforms.")
-
-    extra = ctypes.c_ulong(0)
-    ii_ = Input_I()
-    ii_.ki = KeyBdInput(0, scan_code, 0x0008, 0, ctypes.pointer(extra))
-    x = Input(ctypes.c_ulong(1), ii_)
-    SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
-
-
-def release_key(scan_code: int):
-    """
-    Release a key using its scan code.
-
-    Args:
-        scan_code: The keyboard scan code to release
-    """
-    if SendInput is None:
-        raise OSError("SendInput APIs are only available on Windows platforms.")
-
-    extra = ctypes.c_ulong(0)
-    ii_ = Input_I()
-    ii_.ki = KeyBdInput(0, scan_code, 0x0008 | 0x0002, 0, ctypes.pointer(extra))
-    x = Input(ctypes.c_ulong(1), ii_)
-    SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
-
-
-def _normalize_timing_config(timing: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Sanitize timing configuration and ensure required keys exist.
-
-    Args:
-        timing: Raw timing configuration dictionary.
-
-    Returns:
-        A sanitized copy with validated bounds and known profiles.
-    """
-    normalized = dict(GLOBAL_TIMING)
-    if not isinstance(timing, dict):
-        return normalized
-
-    normalized.update(timing)
-
-    allowed_profiles = {"aggressive", "casual", "relaxed", "custom", "bot"}
-    if normalized.get("profile") not in allowed_profiles:
-        normalized["profile"] = "aggressive"
-
-    for key in [
-        "press_min_ms",
-        "press_max_ms",
-        "interval_min_ms",
-        "interval_max_ms",
-        "random_range_ms"
-    ]:
-        try:
-            normalized[key] = max(1, int(normalized.get(key, GLOBAL_TIMING[key])))
-        except (TypeError, ValueError, KeyError):
-            normalized[key] = GLOBAL_TIMING.get(key, 10)
-
-    normalized["random_enabled"] = bool(normalized.get("random_enabled", False))
-
-    return normalized
-
-
-def _compute_timing(is_float: bool = False) -> Tuple[float, float]:
-    """
-    Compute press and interval timing based on global profile.
-    
-    Args:
-        is_float: Whether this is for a float variable (gets extra delay)
-        
-    Returns:
-        Tuple of (press_time_seconds, interval_time_seconds)
-    """
-    timing_cfg = _normalize_timing_config(GLOBAL_TIMING)
-    profile = timing_cfg.get("profile", "aggressive")
-
-    if profile == "aggressive":
-        press_ms = 10
-        interval_ms = 10
-    elif profile == "casual":
-        press_ms = 80
-        interval_ms = 100
-    elif profile == "relaxed":
-        press_ms = 150
-        interval_ms = 200
-    elif profile == "bot":
-        press_ms = 1
-        interval_ms = 1
-    else:  # custom
-        p_min = timing_cfg.get("press_min_ms", 60)
-        p_max = timing_cfg.get("press_max_ms", 80)
-        i_min = timing_cfg.get("interval_min_ms", 60)
-        i_max = timing_cfg.get("interval_max_ms", 90)
-        press_ms = random.uniform(p_min, p_max)
-        interval_ms = random.uniform(i_min, i_max)
-
-        if timing_cfg.get("random_enabled", False):
-            rng = timing_cfg.get("random_range_ms", 10)
-            press_ms += random.uniform(-rng, rng)
-            interval_ms += random.uniform(-rng, rng)
-
-    # Ensure minimum values, allowing extremely low latency for bot mode
-    min_value = 1 if profile == "bot" else 10
-    press_ms = max(min_value, press_ms)
-    interval_ms = max(min_value, interval_ms)
-
-    # Add extra delay for float variables unless running bot profile
-    if is_float and profile != "bot":
-        press_ms += 30
-
-    return press_ms / 1000.0, interval_ms / 1000.0
-
-
-def click_pulse(scan_code: Optional[int], is_float: bool = False):
-    """
-    Execute a single key press pulse with timing.
-    
-    Args:
-        scan_code: The keyboard scan code to pulse
-        is_float: Whether this is for a float variable
-    """
-    if not scan_code:
-        return
-    try:
-        code = int(scan_code)
-        t_press, t_interval = _compute_timing(is_float=is_float)
-        press_key(code)
-        time.sleep(t_press)
-        release_key(code)
-        time.sleep(t_interval)
-    except Exception as e:
-        print(f"[click_pulse] Error: {e}")
-
-
-def _direct_pulse(scan_code: Optional[int], press_ms: int, interval_ms: int):
-    """
-    Execute a single key press pulse with explicit timing overrides.
-
-    Args:
-        scan_code: The keyboard scan code to pulse.
-        press_ms: Duration to hold the key in milliseconds.
-        interval_ms: Post-release interval in milliseconds.
-    """
-    if not scan_code:
-        return
-
-    try:
-        code = int(scan_code)
-        press_key(code)
-        time.sleep(max(1, press_ms) / 1000.0)
-        release_key(code)
-        time.sleep(max(1, interval_ms) / 1000.0)
-    except Exception as e:
-        print(f"[_direct_pulse] Error: {e}")
+from dominant_control.dependencies import (
+    HAS_PYAUDIO,
+    HAS_PYGAME,
+    HAS_SPEECH,
+    HAS_TTS,
+    HAS_VOSK,
+    pyaudio,
+    pygame,
+    pyttsx3,
+    sr,
+    vosk,
+)
+from dominant_control.input_engine import (
+    IS_WINDOWS,
+    _compute_timing,
+    _direct_pulse,
+    _normalize_timing_config,
+    click_pulse,
+    press_key,
+    release_key,
+)
+from dominant_control.watchdog import Watchdog
 
 
 def _select_english_voice(engine) -> Optional[str]:
@@ -5007,8 +4557,6 @@ class iRacingControlApp:
             return "Using Windows speech recognizer"
 
         if not HAS_VOSK:
-            if _VOSK_IMPORT_ERROR:
-                return f"Vosk unavailable: {_VOSK_IMPORT_ERROR}"
             return "Vosk not installed"
 
         model_path = self.vosk_model_path.get()

@@ -1,5 +1,9 @@
 # Nishizumi (Dominant) Control for iRacing
 
+<img width="256" height="256" alt="dominant_control (1)-5" src="https://github.com/user-attachments/assets/994813f4-dff8-4789-8ba9-3b886bb1e794" />
+
+
+
 An accessibility-focused control manager for iRacing with keyboard/controller mapping, HUD overlays, per-car presets, combo macros, text-to-speech prompts, and offline voice control powered by Vosk.
 
 ![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)

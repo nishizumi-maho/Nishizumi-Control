@@ -145,56 +145,88 @@ except ImportError:
     HAS_VOSK = False
 
 
-# Optional XInput support (Windows-only, non-exclusive controller polling)
-if os.name == "nt":
-    class XINPUT_GAMEPAD(ctypes.Structure):
+# Optional Raw Input support (Windows-only, non-exclusive HID polling)
+RAW_INPUT_AVAILABLE = os.name == "nt"
+
+if RAW_INPUT_AVAILABLE:
+    user32 = ctypes.windll.user32
+    hid = ctypes.windll.hid
+
+    RIDEV_INPUTSINK = 0x00000100
+    RIDEV_DEVNOTIFY = 0x00002000
+    RIDI_DEVICENAME = 0x20000007
+    RIDI_DEVICEINFO = 0x2000000b
+    RID_INPUT = 0x10000003
+    RIM_TYPEHID = 2
+    WM_INPUT = 0x00FF
+    WM_DESTROY = 0x0002
+    HWND_MESSAGE = ctypes.c_void_p(-3 & 0xFFFFFFFF)
+
+    class RAWINPUTHEADER(ctypes.Structure):
         _fields_ = [
-            ("wButtons", ctypes.c_ushort),
-            ("bLeftTrigger", ctypes.c_ubyte),
-            ("bRightTrigger", ctypes.c_ubyte),
-            ("sThumbLX", ctypes.c_short),
-            ("sThumbLY", ctypes.c_short),
-            ("sThumbRX", ctypes.c_short),
-            ("sThumbRY", ctypes.c_short)
+            ("dwType", ctypes.c_uint),
+            ("dwSize", ctypes.c_uint),
+            ("hDevice", ctypes.c_void_p),
+            ("wParam", ctypes.c_ulong)
         ]
 
-    class XINPUT_STATE(ctypes.Structure):
+    class RAWHID(ctypes.Structure):
         _fields_ = [
-            ("dwPacketNumber", ctypes.c_ulong),
-            ("Gamepad", XINPUT_GAMEPAD)
+            ("dwSizeHid", ctypes.c_uint),
+            ("dwCount", ctypes.c_uint),
+            ("bRawData", ctypes.c_ubyte * 1)
         ]
 
-    XINPUT_BUTTONS = [
-        ("DPAD_UP", 0x0001),
-        ("DPAD_DOWN", 0x0002),
-        ("DPAD_LEFT", 0x0004),
-        ("DPAD_RIGHT", 0x0008),
-        ("START", 0x0010),
-        ("BACK", 0x0020),
-        ("LEFT_THUMB", 0x0040),
-        ("RIGHT_THUMB", 0x0080),
-        ("LEFT_SHOULDER", 0x0100),
-        ("RIGHT_SHOULDER", 0x0200),
-        ("GUIDE", 0x0400),
-        ("A", 0x1000),
-        ("B", 0x2000),
-        ("X", 0x4000),
-        ("Y", 0x8000)
-    ]
+    class RAWINPUTUNION(ctypes.Union):
+        _fields_ = [
+            ("hid", RAWHID)
+        ]
 
-    def _load_xinput_library():
-        """Attempt to load an available XInput DLL."""
-        for dll in ("XInput1_4.dll", "XInput1_3.dll", "XInput9_1_0.dll"):
-            try:
-                return ctypes.windll.LoadLibrary(dll)
-            except OSError:
-                continue
-        return None
-else:
-    XINPUT_BUTTONS: List[Tuple[str, int]] = []
+    class RAWINPUT(ctypes.Structure):
+        _fields_ = [
+            ("header", RAWINPUTHEADER),
+            ("data", RAWINPUTUNION)
+        ]
 
-    def _load_xinput_library():
-        return None
+    class RAWINPUTDEVICE(ctypes.Structure):
+        _fields_ = [
+            ("usUsagePage", ctypes.c_ushort),
+            ("usUsage", ctypes.c_ushort),
+            ("dwFlags", ctypes.c_ulong),
+            ("hwndTarget", ctypes.c_void_p)
+        ]
+
+    class RAWINPUTDEVICELIST(ctypes.Structure):
+        _fields_ = [
+            ("hDevice", ctypes.c_void_p),
+            ("dwType", ctypes.c_uint)
+        ]
+
+    class RID_DEVICE_INFO_HID(ctypes.Structure):
+        _fields_ = [
+            ("dwVendorId", ctypes.c_uint),
+            ("dwProductId", ctypes.c_uint),
+            ("dwVersionNumber", ctypes.c_uint),
+            ("usUsagePage", ctypes.c_ushort),
+            ("usUsage", ctypes.c_ushort)
+        ]
+
+    class RID_DEVICE_INFO_UNION(ctypes.Union):
+        _fields_ = [
+            ("hid", RID_DEVICE_INFO_HID)
+        ]
+
+    class RID_DEVICE_INFO(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", ctypes.c_uint),
+            ("dwType", ctypes.c_uint),
+            ("DUMMYUNIONNAME", RID_DEVICE_INFO_UNION)
+        ]
+
+    WNDPROCTYPE = ctypes.WINFUNCTYPE(
+        ctypes.c_long, ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint, ctypes.c_long
+    )
+
 
 
 # ======================================================================
@@ -691,6 +723,228 @@ def speak_text(text: str):
 
 
 # ======================================================================
+# RAW INPUT BACKEND
+# ======================================================================
+
+
+class RawInputBackend:
+    """Minimal Raw Input helper for non-exclusive HID gamepad buttons."""
+
+    def __init__(self):
+        self.available = RAW_INPUT_AVAILABLE
+        self._hwnd = None
+        self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+        self._events: "queue.Queue[Tuple[int, int]]" = queue.Queue()
+        self._callback: Optional[Callable[[int, int], None]] = None
+        self._device_names: Dict[int, str] = {}
+        self._device_ids: Dict[int, int] = {}
+        self._last_buttons: Dict[int, int] = {}
+
+    def _enumerate_devices(self) -> List[Tuple[int, str]]:
+        """Enumerate HID gamepad/joystick devices."""
+
+        if not self.available:
+            return []
+
+        device_count = ctypes.c_uint(0)
+        res = user32.GetRawInputDeviceList(None, ctypes.byref(device_count), ctypes.sizeof(RAWINPUTDEVICELIST))
+        if res != 0 or device_count.value == 0:
+            return []
+
+        array_type = RAWINPUTDEVICELIST * device_count.value
+        device_array = array_type()
+        filled = user32.GetRawInputDeviceList(device_array, ctypes.byref(device_count), ctypes.sizeof(RAWINPUTDEVICELIST))
+        if filled == -1:
+            return []
+
+        devices: List[Tuple[int, str]] = []
+        next_id = max(self._device_ids.values(), default=-1) + 1
+        for entry in device_array[: device_count.value]:
+            if entry.dwType != RIM_TYPEHID:
+                continue
+
+            info_size = ctypes.c_uint(ctypes.sizeof(RID_DEVICE_INFO))
+            info = RID_DEVICE_INFO()
+            info.cbSize = ctypes.sizeof(RID_DEVICE_INFO)
+            result = user32.GetRawInputDeviceInfoW(entry.hDevice, RIDI_DEVICEINFO, ctypes.byref(info), ctypes.byref(info_size))
+            if result == -1:
+                continue
+
+            usage_page = info.DUMMYUNIONNAME.hid.usUsagePage
+            usage = info.DUMMYUNIONNAME.hid.usUsage
+            if usage_page != 0x01 or usage not in (0x04, 0x05):
+                continue
+
+            name_size = ctypes.c_uint(0)
+            if user32.GetRawInputDeviceInfoW(entry.hDevice, RIDI_DEVICENAME, None, ctypes.byref(name_size)) == 0 and name_size.value > 0:
+                name_buffer = (ctypes.c_wchar * name_size.value)()
+                if user32.GetRawInputDeviceInfoW(entry.hDevice, RIDI_DEVICENAME, name_buffer, ctypes.byref(name_size)) != -1:
+                    device_name = name_buffer.value
+                else:
+                    device_name = f"HID Device {entry.hDevice}"
+            else:
+                device_name = f"HID Device {entry.hDevice}"
+
+            handle_key = int(entry.hDevice)
+            if handle_key not in self._device_ids:
+                self._device_ids[handle_key] = next_id
+                next_id += 1
+            devices.append((self._device_ids[handle_key], device_name))
+            self._device_names[handle_key] = device_name
+
+        return devices
+
+    def get_devices(self) -> List[Tuple[int, str]]:
+        return self._enumerate_devices()
+
+    def _register_devices(self) -> bool:
+        """Register for joystick/gamepad raw input."""
+
+        devices = (
+            RAWINPUTDEVICE * 2
+        )()
+        devices[0].usUsagePage = 0x01
+        devices[0].usUsage = 0x04
+        devices[0].dwFlags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY
+        devices[0].hwndTarget = self._hwnd
+
+        devices[1].usUsagePage = 0x01
+        devices[1].usUsage = 0x05
+        devices[1].dwFlags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY
+        devices[1].hwndTarget = self._hwnd
+
+        return bool(user32.RegisterRawInputDevices(devices, len(devices), ctypes.sizeof(RAWINPUTDEVICE)))
+
+    def _create_window(self):
+        """Create a hidden message-only window for WM_INPUT."""
+
+        wnd_class_name = f"RawInputWnd{int(time.time())}"
+
+        @WNDPROCTYPE
+        def _wnd_proc(hwnd, msg, w_param, l_param):
+            if msg == WM_INPUT:
+                self._handle_raw_input(l_param)
+            elif msg == WM_DESTROY:
+                user32.PostQuitMessage(0)
+            return user32.DefWindowProcW(hwnd, msg, w_param, l_param)
+
+        wnd_class = ctypes.wintypes.WNDCLASSW()
+        wnd_class.lpfnWndProc = _wnd_proc
+        wnd_class.lpszClassName = wnd_class_name
+        atom = user32.RegisterClassW(ctypes.byref(wnd_class))
+        if not atom:
+            return None
+
+        hwnd = user32.CreateWindowExW(
+            0,
+            wnd_class_name,
+            wnd_class_name,
+            0,
+            0,
+            0,
+            0,
+            0,
+            HWND_MESSAGE,
+            None,
+            None,
+            None
+        )
+        return hwnd
+
+    def _handle_raw_input(self, l_param):
+        size = ctypes.c_uint(0)
+        if user32.GetRawInputData(l_param, RID_INPUT, None, ctypes.byref(size), ctypes.sizeof(RAWINPUTHEADER)) != 0:
+            return
+
+        buffer = ctypes.create_string_buffer(size.value)
+        if user32.GetRawInputData(l_param, RID_INPUT, buffer, ctypes.byref(size), ctypes.sizeof(RAWINPUTHEADER)) != size.value:
+            return
+
+        raw = ctypes.cast(buffer, ctypes.POINTER(RAWINPUT)).contents
+        if raw.header.dwType != RIM_TYPEHID:
+            return
+
+        device_handle = int(raw.header.hDevice)
+        total = raw.data.hid.dwSizeHid * raw.data.hid.dwCount
+        if total <= 0:
+            return
+
+        data_array = (ctypes.c_ubyte * total).from_address(ctypes.addressof(raw.data.hid.bRawData))
+        mask = 0
+        if total >= 1:
+            mask = data_array[0]
+        if total >= 2:
+            mask |= data_array[1] << 8
+
+        previous = self._last_buttons.get(device_handle, 0)
+        changed = mask & ~previous
+        if changed:
+            device_id = self._device_ids.get(device_handle, len(self._device_ids))
+            if device_handle not in self._device_ids:
+                self._device_ids[device_handle] = device_id
+                self._device_names.setdefault(device_handle, f"HID Device {device_handle}")
+            for btn_idx in range(16):
+                if changed & (1 << btn_idx):
+                    self._events.put((device_id, btn_idx))
+                    if self._callback:
+                        self._callback(device_id, btn_idx)
+        self._last_buttons[device_handle] = mask
+
+    def start(self, callback: Callable[[int, int], None]):
+        if not self.available:
+            return
+        self._callback = callback
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop_event.clear()
+
+        def _run():
+            self._hwnd = self._create_window()
+            if not self._hwnd:
+                return
+            self._register_devices()
+            self._enumerate_devices()
+            msg = ctypes.wintypes.MSG()
+            while not self._stop_event.is_set():
+                has_msg = user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1)
+                if has_msg != 0:
+                    user32.TranslateMessage(ctypes.byref(msg))
+                    user32.DispatchMessageW(ctypes.byref(msg))
+                else:
+                    time.sleep(0.01)
+
+        self._thread = threading.Thread(target=_run, daemon=True, name="RawInputLoop")
+        self._thread.start()
+
+    def stop(self):
+        if not self.available:
+            return
+        self._stop_event.set()
+        if self._hwnd:
+            try:
+                user32.PostMessageW(self._hwnd, WM_DESTROY, 0, 0)
+            except Exception:
+                pass
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=1.0)
+        self._thread = None
+        self._hwnd = None
+
+    def wait_for_event(self, timeout: float) -> Optional[Tuple[int, int]]:
+        try:
+            return self._events.get(timeout=timeout)
+        except Exception:
+            return None
+
+    def get_device_name(self, device_id: int) -> Optional[str]:
+        for handle, idx in self._device_ids.items():
+            if idx == device_id:
+                return self._device_names.get(handle)
+        return None
+
+
+# ======================================================================
 # INPUT MANAGER (Keyboard + Joystick)
 # ======================================================================
 class InputManager:
@@ -716,13 +970,12 @@ class InputManager:
         # Prevent SDL from grabbing exclusive haptics/XInput handles when we only need button input
         self.preserve_game_ffb: bool = os.getenv("DOMINANTCONTROL_PRESERVE_FFB", "1") == "1"
 
-        self._xinput = _load_xinput_library() if os.name == "nt" else None
-        self._xinput_last_buttons: Dict[int, int] = {}
+        self._rawinput = RawInputBackend()
 
         if HAS_PYGAME:
             self.available_backends.append("pygame")
-        if self._xinput:
-            self.available_backends.append("xinput")
+        if self._rawinput.available:
+            self.available_backends.append("rawinput")
 
         if not self.available_backends:
             self.backend = "keyboard"
@@ -741,7 +994,7 @@ class InputManager:
                 self._start_input_loop()
             except Exception as e:
                 print(f"[InputManager] Pygame init error: {e}")
-        elif self.backend == "xinput" and self._xinput:
+        elif self.backend == "rawinput" and self._rawinput.available:
             self._start_input_loop()
 
     def set_safe_mode(self, enabled: bool):
@@ -767,9 +1020,6 @@ class InputManager:
 
         self._stop_input_loop()
 
-        if self.backend == "xinput":
-            self._xinput_last_buttons.clear()
-
         if self.backend == "pygame" and HAS_PYGAME:
             try:
                 if not pygame.get_init():
@@ -779,7 +1029,7 @@ class InputManager:
                 self._start_input_loop()
             except Exception as e:
                 print(f"[InputManager] Error reactivating pygame: {e}")
-        elif self.backend == "xinput" and self._xinput:
+        elif self.backend == "rawinput" and self._rawinput.available:
             self._start_input_loop()
 
     def set_backend(self, backend: str):
@@ -793,7 +1043,6 @@ class InputManager:
             return
 
         self.backend = backend
-        self._xinput_last_buttons.clear()
         self._restart_backend()
 
     def get_all_devices(self) -> List[Tuple[int, str]]:
@@ -806,13 +1055,8 @@ class InputManager:
         if self.safe_mode:
             return []
 
-        if self.backend == "xinput" and self._xinput:
-            devices = []
-            for idx in range(4):
-                state = XINPUT_STATE()
-                if self._xinput.XInputGetState(idx, ctypes.byref(state)) == 0:
-                    devices.append((idx, f"XInput Controller {idx}"))
-            return devices
+        if self.backend == "rawinput" and self._rawinput.available:
+            return self._rawinput.get_devices()
 
         if self.backend == "pygame" and HAS_PYGAME:
             try:
@@ -852,7 +1096,7 @@ class InputManager:
         self.joysticks.clear()
         self.allowed_devices = list(allowed_names)
 
-        if self.backend == "xinput" and self._xinput:
+        if self.backend == "rawinput" and self._rawinput.available:
             if not self.allowed_devices:
                 self.allowed_devices = [name for _, name in self.get_all_devices()]
             return
@@ -888,7 +1132,7 @@ class InputManager:
 
         backend_ready = (
             (self.backend == "pygame" and HAS_PYGAME)
-            or (self.backend == "xinput" and self._xinput)
+            or (self.backend == "rawinput" and self._rawinput.available)
         )
 
         if not backend_ready:
@@ -914,6 +1158,8 @@ class InputManager:
             except Exception:
                 pass
         self._input_thread = None
+        if self.backend == "rawinput" and self._rawinput.available:
+            self._rawinput.stop()
 
     def _restart_input_loop(self):
         """Attempt to restart the input loop if the watchdog detects a stall."""
@@ -944,39 +1190,33 @@ class InputManager:
                                             target=self.listeners[code],
                                             daemon=True
                                         ).start()
-                    elif self.backend == "xinput" and self._xinput and self.active:
-                        self._poll_xinput_events()
+                    elif self.backend == "rawinput" and self._rawinput.available:
+                        if not self._rawinput._thread:
+                            self._rawinput.start(self._handle_rawinput_event)
+                        if self.active:
+                            event = self._rawinput.wait_for_event(timeout=0.05)
+                            if event:
+                                self._dispatch_rawinput_event(*event)
             except Exception:
                 pass
             finally:
                 self._input_watchdog.beat()
             time.sleep(0.01 if self.backend == "pygame" else 0.02)
 
-    def _poll_xinput_events(self):
-        """Poll XInput controllers and dispatch button presses."""
+    def _handle_rawinput_event(self, device_id: int, button_index: int):
+        self._dispatch_rawinput_event(device_id, button_index)
 
-        for idx in range(4):
-            state = XINPUT_STATE()
-            if self._xinput.XInputGetState(idx, ctypes.byref(state)) != 0:
-                self._xinput_last_buttons.pop(idx, None)
-                continue
+    def _dispatch_rawinput_event(self, device_id: int, button_index: int):
+        device_name = self._rawinput.get_device_name(device_id) if self._rawinput else None
+        if self.allowed_devices and device_name and device_name not in self.allowed_devices:
+            return
 
-            device_name = f"XInput Controller {idx}"
-            if self.allowed_devices and device_name not in self.allowed_devices:
-                continue
-
-            previous = self._xinput_last_buttons.get(idx, 0)
-            changed = state.Gamepad.wButtons & ~previous
-            if changed:
-                for btn_index, (_btn_name, mask) in enumerate(XINPUT_BUTTONS):
-                    if changed & mask:
-                        code = f"JOY:{idx}:{btn_index}"
-                        if code in self.listeners:
-                            threading.Thread(
-                                target=self.listeners[code],
-                                daemon=True
-                            ).start()
-            self._xinput_last_buttons[idx] = state.Gamepad.wButtons
+        code = f"JOY:{device_id}:{button_index}"
+        if self.active and code in self.listeners:
+            threading.Thread(
+                target=self.listeners[code],
+                daemon=True
+            ).start()
 
     def capture_any_input(self, timeout: float = 10.0) -> Optional[str]:
         """
@@ -990,8 +1230,6 @@ class InputManager:
         """
         captured_code = None
         start = time.time()
-        xinput_last: Dict[int, int] = {}
-
         def key_hook(e):
             nonlocal captured_code
             if e.event_type == 'down':
@@ -1027,26 +1265,17 @@ class InputManager:
                                     break
                         except Exception:
                             pass
-                    elif self.backend == "xinput" and self._xinput:
-                        for idx in range(4):
-                            state = XINPUT_STATE()
-                            if self._xinput.XInputGetState(idx, ctypes.byref(state)) != 0:
-                                xinput_last.pop(idx, None)
+                    elif self.backend == "rawinput" and self._rawinput.available:
+                        if not self._rawinput._thread:
+                            self._rawinput.start(self._handle_rawinput_event)
+                        event = self._rawinput.wait_for_event(timeout=0.05)
+                        if event:
+                            dev_id, btn_idx = event
+                            device_name = self._rawinput.get_device_name(dev_id)
+                            if self.allowed_devices and device_name and device_name not in self.allowed_devices:
                                 continue
-
-                            device_name = f"XInput Controller {idx}"
-                            if self.allowed_devices and device_name not in self.allowed_devices:
-                                continue
-
-                            changed = state.Gamepad.wButtons & ~xinput_last.get(idx, 0)
-                            if changed:
-                                for b_idx, (_btn_name, mask) in enumerate(XINPUT_BUTTONS):
-                                    if changed & mask:
-                                        captured_code = f"JOY:{idx}:{b_idx}"
-                                        break
-                            xinput_last[idx] = state.Gamepad.wButtons
-                            if captured_code:
-                                break
+                            captured_code = f"JOY:{dev_id}:{btn_idx}"
+                            break
 
                 if captured_code:
                     break
@@ -3590,7 +3819,7 @@ class iRacingControlApp:
 
         tk.Label(
             backend_frame,
-            text="(XInput avoids taking force feedback handles)",
+            text="(Raw Input keeps force feedback handles with the game)",
             fg="gray",
             font=("Arial", 8)
         ).pack(side="left")
@@ -4045,7 +4274,7 @@ class iRacingControlApp:
     def _backend_label(self, key: str) -> str:
         mapping = {
             "pygame": "SDL/Pygame (legacy)",
-            "xinput": "XInput (non-exclusive)"
+            "rawinput": "Raw Input (non-exclusive HID)"
         }
         return mapping.get(key, key.title())
 

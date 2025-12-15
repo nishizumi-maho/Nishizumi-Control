@@ -6,5 +6,6 @@ __all__ = [
     "input_engine",
     "input_manager",
     "tts",
+    "voice",
     "watchdog",
 ]

@@ -15,7 +15,7 @@ Version: 1.0.0
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog, colorchooser
+from tkinter import ttk, messagebox, simpledialog, colorchooser, filedialog
 import time
 import ctypes
 import keyboard
@@ -63,6 +63,13 @@ else:
     sr = None
     HAS_SPEECH = False
     print("Warning: 'speech_recognition' not installed. Voice triggers disabled.")
+
+try:
+    import vosk
+    HAS_VOSK = True
+except ImportError:
+    vosk = None
+    HAS_VOSK = False
 
 # ======================================================================
 # GLOBAL CONFIGURATION
@@ -730,6 +737,10 @@ class VoiceListener:
         self.lock = threading.Lock()
         self._noise_adjusted = False
         self.last_engine: Optional[str] = None
+        self.engine = "speech"
+        self.vosk_model_path: str = ""
+        self.vosk_model: Optional[Any] = None
+        self._vosk_error: Optional[str] = None
 
     def set_phrases(self, phrases: Dict[str, Callable]):
         """Replace the phrase→callback map."""
@@ -758,11 +769,57 @@ class VoiceListener:
     def stop(self):
         self.running = False
 
+    def set_engine(self, engine: str, model_path: str = ""):
+        """Configure which recognition engine to use."""
+        engine = engine if engine in {"speech", "vosk"} else "speech"
+        self.engine = engine
+        self.vosk_model_path = model_path
+
+        if engine == "vosk":
+            self._init_vosk_model(model_path)
+        else:
+            self.vosk_model = None
+            self._vosk_error = None
+
+    def _init_vosk_model(self, model_path: str):
+        """Load the Vosk model from disk if available."""
+        if not HAS_VOSK or not model_path:
+            self.vosk_model = None
+            return
+
+        if self.vosk_model_path == model_path and self.vosk_model is not None:
+            return
+
+        try:
+            self.vosk_model = vosk.Model(model_path)
+            self._vosk_error = None
+        except Exception as exc:
+            self.vosk_model = None
+            self._vosk_error = str(exc)
+            print(f"[Voice][Vosk] Failed to load model: {exc}")
+
     def _recognize_text(self, audio, recognizer=None) -> Optional[str]:
         """Try multiple engines to convert audio to text."""
         rec = recognizer or self.recognizer
         if not rec:
             return None
+
+        if self.engine == "vosk" and HAS_VOSK and self.vosk_model:
+            try:
+                raw = audio.get_raw_data(convert_rate=16000, convert_width=2)
+                vosk_rec = vosk.KaldiRecognizer(self.vosk_model, 16000)
+                if vosk_rec.AcceptWaveform(raw):
+                    result_json = vosk_rec.Result()
+                else:
+                    result_json = vosk_rec.FinalResult()
+
+                parsed = json.loads(result_json or "{}")
+                text = (parsed.get("text") or "").strip()
+                if text:
+                    self.last_engine = "vosk"
+                    return text
+            except Exception as exc:
+                print(f"[Voice][Vosk] Recognition error: {exc}")
 
         engines: List[Tuple[str, Callable]] = []
         if hasattr(rec, "recognize_sapi"):
@@ -2694,6 +2751,8 @@ class iRacingControlApp:
         self.use_keyboard_only = tk.BooleanVar(value=False)
         self.use_tts = tk.BooleanVar(value=False)
         self.use_voice = tk.BooleanVar(value=False)
+        self.voice_engine = tk.StringVar(value="speech")
+        self.vosk_model_path = tk.StringVar(value="")
         self.auto_detect = tk.BooleanVar(value=True)
         self.auto_restart_on_rescan = tk.BooleanVar(value=True)
         self.auto_restart_on_race = tk.BooleanVar(value=True)
@@ -2705,6 +2764,7 @@ class iRacingControlApp:
         # Create UI
         self._create_menu()
         self._create_main_ui()
+        self._update_voice_controls()
 
         # Initialize devices
         self.update_safe_mode()
@@ -2834,6 +2894,42 @@ class iRacingControlApp:
                 fg="gray",
                 font=("Arial", 8)
             ).pack(side="right", padx=4)
+
+        voice_engine_frame = tk.Frame(self.root)
+        voice_engine_frame.pack(fill="x", padx=10, pady=(0, 5))
+
+        ttk.Label(voice_engine_frame, text="Voice Engine:").pack(side="left")
+        engine_options = ["speech"] + (["vosk"] if HAS_VOSK else [])
+        self.voice_engine_combo = ttk.Combobox(
+            voice_engine_frame,
+            values=engine_options,
+            state="readonly",
+            width=12
+        )
+        default_engine = self.voice_engine.get()
+        if default_engine not in engine_options:
+            default_engine = "speech"
+            self.voice_engine.set(default_engine)
+        self.voice_engine_combo.set(default_engine)
+        self.voice_engine_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda _evt: self.on_voice_engine_changed()
+        )
+        self.voice_engine_combo.pack(side="left", padx=4)
+
+        self.btn_vosk_model = tk.Button(
+            voice_engine_frame,
+            text="Select Vosk Model...",
+            command=self.choose_vosk_model
+        )
+        self.btn_vosk_model.pack(side="left", padx=4)
+
+        self.vosk_status_var = tk.StringVar(value="")
+        tk.Label(
+            voice_engine_frame,
+            textvariable=self.vosk_status_var,
+            fg="gray"
+        ).pack(side="left", padx=6)
 
         # Auto-detect
         auto_frame = tk.Frame(self.root)
@@ -3621,6 +3717,8 @@ class iRacingControlApp:
             "use_keyboard_only": self.use_keyboard_only.get(),
             "use_tts": self.use_tts.get(),
             "use_voice": self.use_voice.get(),
+            "voice_engine": self.voice_engine.get(),
+            "vosk_model_path": self.vosk_model_path.get(),
             "auto_detect": self.auto_detect.get(),
             "auto_restart_on_rescan": self.auto_restart_on_rescan.get(),
             "auto_restart_on_race": self.auto_restart_on_race.get(),
@@ -3661,6 +3759,8 @@ class iRacingControlApp:
         self.use_keyboard_only.set(data.get("use_keyboard_only", False))
         self.use_tts.set(data.get("use_tts", False))
         self.use_voice.set(data.get("use_voice", False))
+        self.voice_engine.set(data.get("voice_engine", "speech"))
+        self.vosk_model_path.set(data.get("vosk_model_path", ""))
         self.auto_detect.set(data.get("auto_detect", True))
         self.auto_restart_on_rescan.set(data.get("auto_restart_on_rescan", True))
         self.auto_restart_on_race.set(data.get("auto_restart_on_race", True))
@@ -3746,6 +3846,68 @@ class iRacingControlApp:
 
         return voice_phrases
 
+    def _format_vosk_status(self) -> str:
+        """Return a user-friendly status string for Vosk usage."""
+        engine = self.voice_engine.get()
+        if engine != "vosk":
+            return "Using Windows speech recognizer"
+
+        if not HAS_VOSK:
+            return "Vosk not installed"
+
+        model_path = self.vosk_model_path.get()
+        if not model_path:
+            return "Select a Vosk model folder"
+
+        if voice_listener._vosk_error:
+            return f"Model error: {voice_listener._vosk_error}"
+
+        if voice_listener.vosk_model is not None:
+            name = os.path.basename(model_path.rstrip(os.sep)) or model_path
+            return f"Vosk model: {name}"
+
+        return "Loading Vosk model..."
+
+    def on_voice_engine_changed(self):
+        """Handle engine dropdown changes."""
+        selection = self.voice_engine_combo.get()
+        if selection not in {"speech", "vosk"}:
+            selection = "speech"
+
+        if selection == "vosk" and not HAS_VOSK:
+            selection = "speech"
+
+        self.voice_engine.set(selection)
+        self._update_voice_controls()
+        self.register_current_listeners()
+
+    def choose_vosk_model(self):
+        """Prompt the user to select a Vosk model directory."""
+        path = filedialog.askdirectory(title="Select Vosk model folder")
+        if not path:
+            return
+
+        self.vosk_model_path.set(path)
+        self._update_voice_controls()
+        self.register_current_listeners()
+
+    def _update_voice_controls(self):
+        """Refresh UI state and listener config for voice engine selection."""
+        engine = self.voice_engine.get()
+        if engine == "vosk" and not HAS_VOSK:
+            engine = "speech"
+            self.voice_engine.set(engine)
+            self.voice_engine_combo.set(engine)
+
+        if engine == "vosk":
+            voice_listener.set_engine(engine, self.vosk_model_path.get())
+        else:
+            voice_listener.set_engine("speech", "")
+
+        btn_state = "normal" if engine == "vosk" and HAS_VOSK else "disabled"
+        self.btn_vosk_model.config(state=btn_state)
+        self.vosk_status_var.set(self._format_vosk_status())
+
     def open_voice_test_dialog(self):
         """Open the dialog that validates configured voice commands."""
         if not HAS_SPEECH:
@@ -3823,12 +3985,16 @@ class iRacingControlApp:
                 if phrase:
                     voice_phrases[phrase] = action
 
-        self.voice_phrase_map = voice_phrases or self._build_voice_phrase_map()
+        self.voice_phrase_map = voice_phrases
 
         input_manager.active = (self.app_state == "RUNNING")
         if self.app_state != "RUNNING":
             voice_listener.set_enabled(False)
         elif self.use_voice.get():
+            voice_listener.set_engine(
+                self.voice_engine.get(),
+                self.vosk_model_path.get()
+            )
             voice_listener.set_phrases(self.voice_phrase_map)
             voice_listener.set_enabled(True)
         else:

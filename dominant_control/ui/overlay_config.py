@@ -317,6 +317,7 @@ class OverlayConfigTab(tk.Frame):
         car = self.app.current_car or "Generic Car"
         self._collect_feedback_for_car(car)
         self.app.schedule_save()
+        self.app.sync_overlay_manager()
 
     def _on_feedback_toggle(self):
         """Enable or disable assist hints and persist the preference."""

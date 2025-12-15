@@ -3345,6 +3345,24 @@ class iRacingControlApp:
         )
         self.btn_mode.pack(fill="x")
 
+        helper_frame = tk.LabelFrame(
+            self.root,
+            text="Getting started"
+        )
+        helper_frame.pack(fill="x", padx=10, pady=(0, 6))
+
+        helper_text = (
+            "Follow the steps below in order: 1) pick your car and track, "
+            "2) confirm your input devices, then 3) scan driver controls. "
+            "Use CONFIG mode when changing bindings and RUNNING mode when driving."
+        )
+        tk.Label(
+            helper_frame,
+            text=helper_text,
+            wraplength=760,
+            justify="left"
+        ).pack(fill="x", padx=8, pady=4)
+
         # Settings row
         settings_frame = tk.Frame(self.root)
         settings_frame.pack(fill="x", padx=10, pady=5)
@@ -3401,7 +3419,10 @@ class iRacingControlApp:
         ).pack(anchor="w", pady=2)
 
         # Car/Track manager
-        presets_frame = tk.LabelFrame(self.root, text="Car -> Track Manager")
+        presets_frame = tk.LabelFrame(
+            self.root,
+            text="Step 1: Choose your car and track"
+        )
         presets_frame.pack(fill="x", padx=10, pady=5)
 
         selector_frame = tk.Frame(presets_frame)
@@ -3442,8 +3463,8 @@ class iRacingControlApp:
 
         # Device management
         devices_frame = tk.LabelFrame(
-            self.root, 
-            text="Input Devices (Joystick/Wheel)"
+            self.root,
+            text="Step 2: Confirm input devices (joystick/wheel)"
         )
         devices_frame.pack(fill="x", padx=10, pady=5)
 
@@ -3457,11 +3478,18 @@ class iRacingControlApp:
         # Scan button
         self.btn_scan = tk.Button(
             self.root,
-            text="🔍 SCAN DRIVER CONTROLS (dc*) FOR CURRENT CAR",
+            text="Step 3: Scan driver controls for the selected car",
             command=self.scan_driver_controls,
             bg="lightblue"
         )
         self.btn_scan.pack(fill="x", padx=10, pady=5)
+
+        tk.Label(
+            self.root,
+            text="Tip: Scan after changing devices or presets to keep bindings in sync.",
+            fg="gray",
+            font=("Arial", 9)
+        ).pack(fill="x", padx=12, pady=(0, 4))
 
         # Main notebook
         self.notebook = ttk.Notebook(self.root)

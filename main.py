@@ -2366,6 +2366,19 @@ class ControlTab(tk.Frame):
             font=("Arial", 8)
         ).pack(anchor="w", pady=(0, 5))
 
+        tk.Label(
+            presets_frame,
+            text=(
+                "Voice column: type the exact phrase you will say to trigger or"
+                " speak this macro. Voice/Audio Settings live under Options"
+                " → Voice/Audio Settings."
+            ),
+            fg="gray",
+            font=("Arial", 8),
+            wraplength=760,
+            justify="left"
+        ).pack(anchor="w", padx=2, pady=(0, 5))
+
         self.presets_container = tk.Frame(presets_frame)
         self.presets_container.pack(fill="both", expand=True)
 
@@ -2687,11 +2700,24 @@ class ComboTab(tk.Frame):
 
         for var_name in self.var_names:
             tk.Label(
-                header, 
-                text=var_name.replace("dc", ""), 
-                width=8, 
+                header,
+                text=var_name.replace("dc", ""),
+                width=8,
                 font=("Arial", 8)
             ).pack(side="left", padx=2)
+
+        tk.Label(
+            body,
+            text=(
+                "Voice column: type the exact phrase you will say to trigger"
+                " this combo. Voice/Audio Settings live under Options"
+                " → Voice/Audio Settings."
+            ),
+            fg="gray",
+            font=("Arial", 8),
+            wraplength=760,
+            justify="left"
+        ).pack(fill="x", padx=5, pady=(0, 4))
 
         self.presets_container = tk.Frame(body)
         self.presets_container.pack(fill="both", expand=True, padx=5, pady=5)

@@ -35,6 +35,69 @@ import wave
 from typing import Dict, List, Tuple, Optional, Any, Callable
 
 # ======================================================================
+# WATCHDOG UTILITY
+# ======================================================================
+
+
+class Watchdog:
+    """Simple watchdog to monitor heartbeats and run recovery callbacks."""
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        interval_s: float = 2.0,
+        timeout_s: float = 6.0,
+        on_trip: Optional[Callable[[], None]] = None
+    ):
+        self.name = name
+        self.interval_s = max(0.5, interval_s)
+        self.timeout_s = max(self.interval_s, timeout_s)
+        self.on_trip = on_trip
+        self._last_heartbeat = time.time()
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def beat(self):
+        """Record a heartbeat from the monitored worker."""
+
+        self._last_heartbeat = time.time()
+
+    def start(self):
+        """Start the watchdog monitor thread."""
+
+        if self._thread and self._thread.is_alive():
+            return
+
+        if self._stop_event.is_set():
+            self._stop_event = threading.Event()
+
+        self._last_heartbeat = time.time()
+        self._thread = threading.Thread(
+            target=self._run, name=f"{self.name}-watchdog", daemon=True
+        )
+        self._thread.start()
+
+    def stop(self):
+        """Stop monitoring."""
+
+        self._stop_event.set()
+
+    def _run(self):
+        while not self._stop_event.wait(self.interval_s):
+            elapsed = time.time() - self._last_heartbeat
+            if elapsed <= self.timeout_s:
+                continue
+
+            try:
+                if self.on_trip:
+                    self.on_trip()
+            except Exception as exc:  # noqa: PERF203
+                print(f"[Watchdog:{self.name}] Recovery failed: {exc}")
+
+            self._last_heartbeat = time.time()
+
+# ======================================================================
 # WARNING SUPPRESSION
 # ======================================================================
 warnings.filterwarnings(
@@ -590,6 +653,10 @@ class InputManager:
         self.active: bool = False
         self.allowed_devices: List[str] = []
         self.safe_mode: bool = False
+        self._input_thread: Optional[threading.Thread] = None
+        self._input_watchdog = Watchdog(
+            "InputManager", interval_s=2.5, timeout_s=8.0, on_trip=self._restart_input_loop
+        )
         # Prevent SDL from grabbing exclusive haptics/XInput handles when we only need button input
         self.preserve_game_ffb: bool = os.getenv("DOMINANTCONTROL_PRESERVE_FFB", "1") == "1"
 
@@ -602,7 +669,7 @@ class InputManager:
                     os.environ.setdefault("SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
                 pygame.init()
                 pygame.joystick.init()
-                threading.Thread(target=self._input_loop, daemon=True).start()
+                self._start_input_loop()
             except Exception as e:
                 print(f"[InputManager] Pygame init error: {e}")
 
@@ -627,6 +694,7 @@ class InputManager:
                         pygame.init()
                     if not pygame.joystick.get_init():
                         pygame.joystick.init()
+                    self._start_input_loop()
                 except Exception as e:
                     print(f"[InputManager] Error reactivating pygame: {e}")
 
@@ -697,8 +765,35 @@ class InputManager:
         except Exception:
             pass
 
-    def _input_loop(self):
-        """Background loop to capture joystick events."""
+    def _start_input_loop(self, force: bool = False):
+        """Start or restart the input loop thread with watchdog protection."""
+
+        if not HAS_PYGAME:
+            return
+
+        if not force and self._input_thread and self._input_thread.is_alive():
+            return
+
+        self._input_thread = threading.Thread(
+            target=self._input_loop_with_watchdog, daemon=True, name="InputLoop"
+        )
+        self._input_thread.start()
+        self._input_watchdog.start()
+
+    def _restart_input_loop(self):
+        """Attempt to restart the input loop if the watchdog detects a stall."""
+
+        if self.safe_mode or not HAS_PYGAME:
+            return
+
+        if self._input_thread and self._input_thread.is_alive():
+            return
+
+        print("[InputManager][Watchdog] Input loop unresponsive, restarting...")
+        self._start_input_loop(force=True)
+
+    def _input_loop_with_watchdog(self):
+        """Background loop to capture joystick events and feed watchdog."""
         while True:
             try:
                 if not self.safe_mode and HAS_PYGAME and pygame.get_init():
@@ -710,11 +805,13 @@ class InputManager:
                                 code = f"JOY:{event.joy}:{event.button}"
                                 if code in self.listeners:
                                     threading.Thread(
-                                        target=self.listeners[code], 
+                                        target=self.listeners[code],
                                         daemon=True
                                     ).start()
             except Exception:
                 pass
+            finally:
+                self._input_watchdog.beat()
             time.sleep(0.01)
 
     def capture_any_input(self, timeout: float = 10.0) -> Optional[str]:
@@ -849,6 +946,9 @@ class VoiceListener:
         self.dynamic_energy = VOICE_TUNING_DEFAULTS["dynamic_energy"]
         if self.recognizer:
             self._apply_recognizer_settings(self.recognizer)
+        self._watchdog = Watchdog(
+            "VoiceListener", interval_s=2.0, timeout_s=7.0, on_trip=self._recover_listener
+        )
 
     def set_phrases(self, phrases: Dict[str, Callable]):
         """Replace the phrase-to-callback map."""
@@ -875,15 +975,22 @@ class VoiceListener:
             self.start()
 
     def start(self):
-        if self.running or not self.available:
+        if not self.available:
+            return
+
+        if self.running and self.thread and self.thread.is_alive():
             return
 
         self.running = True
-        self.thread = threading.Thread(target=self._listen_loop, daemon=True)
+        self.thread = threading.Thread(
+            target=self._listen_loop_with_watchdog, daemon=True, name="VoiceListener"
+        )
         self.thread.start()
+        self._watchdog.start()
 
     def stop(self):
         self.running = False
+        self._watchdog.stop()
 
     def set_engine(self, engine: str, model_path: str = ""):
         """Configure which recognition engine to use."""
@@ -946,6 +1053,27 @@ class VoiceListener:
         elif HAS_SPEECH and sr is not None:
             self.recognizer = sr.Recognizer()
             self._apply_recognizer_settings(self.recognizer)
+
+    def _recover_listener(self):
+        """Restart the listener thread if it stops unexpectedly."""
+
+        if not self.running:
+            return
+
+        if self.thread and self.thread.is_alive():
+            return
+
+        print("[Voice][Watchdog] Listener thread unresponsive, restarting...")
+        self.start()
+
+    def _listen_loop_with_watchdog(self):
+        """Wrap the listener loop with heartbeat updates."""
+
+        self._watchdog.beat()
+        try:
+            self._listen_loop()
+        finally:
+            self._watchdog.beat()
 
     def _init_vosk_model(self, model_path: str):
         """Load the Vosk model from disk if available."""
@@ -1033,6 +1161,7 @@ class VoiceListener:
                 )
 
                 while self.running:
+                    self._watchdog.beat()
                     try:
                         audio = self.recognizer.listen(
                             source,

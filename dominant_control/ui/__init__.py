@@ -1,5 +1,6 @@
 """UI components for Dominant Control."""
 
-from .timing_window import GlobalTimingWindow
+from dominant_control.ui.device_selector import DeviceSelector
+from dominant_control.ui.overlay_window import OverlayWindow
 
-__all__ = ["GlobalTimingWindow"]
+__all__ = ["DeviceSelector", "OverlayWindow"]

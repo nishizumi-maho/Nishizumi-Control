@@ -48,6 +48,8 @@ from dominant_control.config import (
     restart_program,
 )
 from dominant_control.controllers import GenericController
+from dominant_control.controllers.device_allowlist import DeviceAllowlistManager
+from dominant_control.controllers.lifecycle import LifecycleManager
 from dominant_control.dependencies import (
     HAS_PYAUDIO,
     HAS_PYGAME,
@@ -70,9 +72,11 @@ from dominant_control.ui.combo_tab import ComboTab
 from dominant_control.ui.control_tab import ControlTab
 from dominant_control.ui.device_selector import DeviceSelector
 from dominant_control.ui.overlay_config import OverlayConfigTab, ScrollableFrame
+from dominant_control.ui.overlay_feedback import OverlayFeedbackManager
 from dominant_control.ui.overlay_window import OverlayWindow
 from dominant_control.ui.timing_window import GlobalTimingWindow
 from dominant_control.voice import VoiceTestDialog, voice_listener
+from dominant_control.voice_control import VoiceControlManager
 
 
 
@@ -745,16 +749,6 @@ class iRacingControlApp:
         self.car_overlay_feedback: Dict[str, Dict[str, float]] = {}
         self.show_overlay_feedback = tk.BooleanVar(value=True)
 
-        self._overlay_feedback_state = {
-            "last_time": time.time(),
-            "abs_active": 0.0,
-            "tc_active": 0.0,
-            "spin_active": 0.0,
-            "lock_active": 0.0,
-            "last_alert": "",
-            "last_alert_time": 0.0
-        }
-
         # Active variables for current car
         self.active_vars: List[Tuple[str, bool]] = []
 
@@ -807,8 +801,19 @@ class iRacingControlApp:
         self.auto_detect = tk.BooleanVar(value=True)
         self.auto_restart_on_rescan = tk.BooleanVar(value=True)
         self.auto_restart_on_race = tk.BooleanVar(value=True)
-        self.voice_phrase_map: Dict[str, Callable] = {}
         self._voice_traces_attached = False
+
+        # Shared helpers
+        self.filedialog = filedialog
+        self.messagebox = messagebox
+
+        # Managers
+        self.overlay_feedback_manager = OverlayFeedbackManager(
+            self.ir, self.notify_overlay_status
+        )
+        self.device_manager = DeviceAllowlistManager(self)
+        self.lifecycle_manager = LifecycleManager(self)
+        self.voice_control = VoiceControlManager(self)
 
         # Load configuration
         self.load_config()
@@ -816,7 +821,7 @@ class iRacingControlApp:
         # Create UI
         self._create_menu()
         self._create_main_ui()
-        self._update_voice_controls()
+        self.voice_control.update_voice_controls()
 
         # Initialize devices
         self.update_safe_mode()
@@ -836,65 +841,13 @@ class iRacingControlApp:
         self.root.after(200, self._perform_pending_scan)
 
     def _voice_tuning_config(self) -> Dict[str, Any]:
-        """Return sanitized voice tuning configuration from the UI."""
-
-        def _safe_float(var: Any, default: float) -> float:
-            try:
-                return float(var.get())
-            except Exception:
-                return default
-
-        energy_raw = self.voice_energy_threshold.get().strip()
-        try:
-            energy_val = float(energy_raw) if energy_raw else None
-        except Exception:
-            energy_val = None
-
-        return {
-            "ambient_duration": max(
-                0.0,
-                _safe_float(
-                    self.voice_ambient_duration,
-                    VOICE_TUNING_DEFAULTS["ambient_duration"]
-                )
-            ),
-            "initial_timeout": max(
-                0.0,
-                _safe_float(
-                    self.voice_initial_timeout,
-                    VOICE_TUNING_DEFAULTS["initial_timeout"]
-                )
-            ),
-            "continuous_timeout": max(
-                0.0,
-                _safe_float(
-                    self.voice_continuous_timeout,
-                    VOICE_TUNING_DEFAULTS["continuous_timeout"]
-                )
-            ),
-            "phrase_time_limit": max(
-                0.0,
-                _safe_float(
-                    self.voice_phrase_time_limit,
-                    VOICE_TUNING_DEFAULTS["phrase_time_limit"]
-                )
-            ),
-            "energy_threshold": energy_val,
-            "dynamic_energy": self.voice_dynamic_energy.get()
-        }
+        return self.voice_control.tuning_config()
 
     def apply_voice_tuning(self, persist: bool = False):
-        """Send current tuning settings to the listener and optionally save."""
-
-        tuning = self._voice_tuning_config()
-        voice_listener.update_tuning(tuning)
-        if persist:
-            self.schedule_save()
+        self.voice_control.apply_voice_tuning(persist=persist)
 
     def on_voice_tuning_changed(self, *_):
-        """Propagate UI changes to the listener and persist them."""
-
-        self.apply_voice_tuning(persist=True)
+        self.voice_control.on_voice_tuning_changed()
 
     def ui(self, fn: Callable, *args, **kwargs):
         """Thread-safe UI dispatcher."""
@@ -913,6 +866,14 @@ class iRacingControlApp:
                 print(f"[UI] Handler error: {exc}")
 
         self.root.after(30, self._drain_ui_queue)
+
+    @staticmethod
+    def consume_pending_scan() -> bool:
+        return consume_pending_scan()
+
+    @staticmethod
+    def restart_program():
+        restart_program()
 
     def _create_menu(self):
         """Create application menu bar."""
@@ -1178,6 +1139,9 @@ class iRacingControlApp:
         output_index = self.audio_output_device.get()
         global TTS_OUTPUT_DEVICE_INDEX
         TTS_OUTPUT_DEVICE_INDEX = output_index if output_index >= 0 else None
+
+    def apply_audio_preferences(self):
+        self._apply_audio_preferences()
 
     def _refresh_audio_device_lists(self):
         mic_devices = self._list_microphones()
@@ -1463,45 +1427,16 @@ class iRacingControlApp:
 
     # Safe mode and device management
     def update_safe_mode(self):
-        """Update safe mode settings."""
-        input_manager.set_safe_mode(self.use_keyboard_only.get())
-        if not self.use_keyboard_only.get():
-            input_manager.connect_allowed_devices(input_manager.allowed_devices)
+        self.device_manager.update_safe_mode()
 
     def trigger_safe_mode_update(self):
-        """Trigger safe mode update with restart."""
-        new_value = self.use_keyboard_only.get()
-        if messagebox.askokcancel(
-            "Restart Required",
-            "Restart is required to apply Keyboard Only mode. Confirm?"
-        ):
-            self.save_config()
-            restart_program()
-        else:
-            self.use_keyboard_only.set(not new_value)
-            self.save_config()
-        self.update_safe_mode()
+        self.device_manager.trigger_safe_mode_update()
 
     def open_device_manager(self):
-        """Open device management dialog."""
-        if self.use_keyboard_only.get():
-            messagebox.showinfo(
-                "Keyboard Mode",
-                "Disable 'Keyboard Only Mode' to manage joystick devices."
-            )
-            return
-
-        DeviceSelector(
-            self.root, 
-            input_manager.allowed_devices, 
-            self.update_allowed_devices
-        )
+        self.device_manager.open_device_manager()
 
     def update_allowed_devices(self, new_list: List[str]):
-        """Update list of allowed devices."""
-        input_manager.allowed_devices = list(new_list)
-        input_manager.connect_allowed_devices(input_manager.allowed_devices)
-        self.save_config()
+        self.device_manager.update_allowed_devices(new_list)
 
     # Car/Track/Preset management
     def update_preset_ui(self):
@@ -1679,7 +1614,7 @@ class iRacingControlApp:
                 return
 
             session_type = self._get_session_type()
-            if self._handle_session_change(session_type):
+            if self.lifecycle_manager.handle_session_change(session_type):
                 return
 
             if not self.auto_detect.get():
@@ -1787,24 +1722,7 @@ class iRacingControlApp:
         return ""
 
     def _handle_session_change(self, session_type: str) -> bool:
-        """Handle session transitions and restart if entering a race."""
-        new_type = session_type or ""
-
-        if new_type != self.last_session_type:
-            self.last_session_type = new_type
-
-            if self.skip_race_restart_once and new_type == "Race":
-                self.skip_race_restart_once = False
-                return False
-
-            if self.auto_restart_on_race.get() and new_type == "Race":
-                self.pending_scan_on_start = True
-                mark_pending_scan()
-                self.save_config()
-                restart_program()
-                return True
-
-        return False
+        return self.lifecycle_manager.handle_session_change(session_type)
 
     def scan_driver_controls(self):
         """Scan for dc* driver control variables in current car."""
@@ -2105,166 +2023,32 @@ class iRacingControlApp:
 
             self.overlay.update_monitor_values(data)
 
-        if self.show_overlay_feedback.get():
-            self._update_overlay_feedback()
-        else:
-            self._overlay_feedback_state["last_time"] = time.time()
+        self._update_overlay_feedback()
 
         self.root.after(100, self.update_overlay_loop)
 
     def _read_ir_value(self, key: str):
-        """Safely read a telemetry key from the iRacing SDK."""
-
-        try:
-            if not getattr(self.ir, "is_initialized", False):
-                self.ir.startup()
-            return self.ir[key]
-        except Exception:
-            return None
+        return self.overlay_feedback_manager._read_ir_value(key)
 
     @staticmethod
     def _safe_float(value: Any, default: float = 0.0) -> float:
-        try:
-            return float(value)
-        except Exception:
-            return default
+        return OverlayFeedbackManager._safe_float(value, default)
 
     def _bool_from_keys(self, keys: List[str]) -> bool:
-        """Return True if any telemetry key resolves to a truthy value."""
-
-        for key in keys:
-            value = self._read_ir_value(key)
-
-            if isinstance(value, (list, tuple)):
-                if any(bool(v) for v in value):
-                    return True
-            elif isinstance(value, numbers.Real):
-                if float(value) != 0.0:
-                    return True
-            elif isinstance(value, bool) and value:
-                return True
-
-        return False
+        return self.overlay_feedback_manager._bool_from_keys(keys)
 
     def _slip_values(self) -> List[float]:
-        """Aggregate slip ratios from available telemetry fields."""
-
-        slips: List[float] = []
-        for key in ["WheelSlip", "WheelSlipPct", "WheelSlipRatio", "TireSlip"]:
-            value = self._read_ir_value(key)
-            if isinstance(value, (list, tuple)):
-                slips.extend([self._safe_float(v, 0.0) for v in value])
-
-        return slips
+        return self.overlay_feedback_manager._slip_values()
 
     def _push_overlay_alert(
         self, message: str, color: str, cfg: Dict[str, float], now: float
     ) -> None:
-        """Send rate-limited feedback to the overlay status area."""
-
-        state = self._overlay_feedback_state
-        cooldown = max(0.5, float(cfg.get("cooldown_s", 6.0)))
-
-        if (
-            now - state.get("last_alert_time", 0.0) < cooldown
-            and state.get("last_alert") == message
-        ):
-            return
-
-        self.notify_overlay_status(message, color)
-        state["last_alert"] = message
-        state["last_alert_time"] = now
+        self.overlay_feedback_manager._push_overlay_alert(message, color, cfg, now)
 
     def _update_overlay_feedback(self):
-        """Analyze telemetry and surface ABS/TC/wheelspin hints on the HUD."""
-
-        car = self.current_car or "Generic Car"
-        cfg = DEFAULT_OVERLAY_FEEDBACK.copy()
-        cfg.update(self.car_overlay_feedback.get(car, {}))
-
-        state = self._overlay_feedback_state
-        now = time.time()
-        dt = max(0.0, now - state.get("last_time", now))
-        state["last_time"] = now
-
-        throttle = self._safe_float(self._read_ir_value("Throttle"), 0.0)
-        brake = self._safe_float(self._read_ir_value("Brake"), 0.0)
-
-        abs_active = self._bool_from_keys([
-            "BrakeABSactive",
-            "BrakeABSActive",
-            "BrakeABSActiveLF",
-            "BrakeABSActiveRF",
-            "BrakeABSActiveLR",
-            "BrakeABSActiveRR",
-        ])
-        tc_active = self._bool_from_keys([
-            "TractionControlActive",
-            "TractionControlEngaged",
-            "TCActive",
-            "TractionControlOn",
-        ])
-
-        slips = self._slip_values()
-        max_slip = max(slips) if slips else 0.0
-        min_slip = min(slips) if slips else 0.0
-
-        if abs_active and brake > 0.05:
-            state["abs_active"] += dt
-        else:
-            state["abs_active"] = 0.0
-
-        if tc_active and throttle > 0.2:
-            state["tc_active"] += dt
-        else:
-            state["tc_active"] = 0.0
-
-        if throttle > 0.2 and max_slip >= cfg["wheelspin_slip"]:
-            state["spin_active"] += dt
-        else:
-            state["spin_active"] = 0.0
-
-        lock_threshold = -abs(cfg["lockup_slip"])
-        if brake > 0.05 and slips and min_slip <= lock_threshold:
-            state["lock_active"] += dt
-        else:
-            state["lock_active"] = 0.0
-
-        if state["abs_active"] >= cfg["abs_hold_s"]:
-            self._push_overlay_alert(
-                "ABS active too long: ease off the brake or lower ABS.",
-                "orange",
-                cfg,
-                now
-            )
-            state["abs_active"] = 0.0
-
-        if state["tc_active"] >= cfg["tc_hold_s"]:
-            self._push_overlay_alert(
-                "TC constantly triggering: consider lowering TC or changing the map.",
-                "orange",
-                cfg,
-                now
-            )
-            state["tc_active"] = 0.0
-
-        if state["spin_active"] >= cfg["wheelspin_hold_s"]:
-            self._push_overlay_alert(
-                "Wheelspin detected: raise TC or modulate the throttle.",
-                "orange",
-                cfg,
-                now
-            )
-            state["spin_active"] = 0.0
-
-        if state["lock_active"] >= cfg["lockup_hold_s"]:
-            self._push_overlay_alert(
-                "Lock-up detected: increase ABS or ease pedal pressure.",
-                "orange",
-                cfg,
-                now
-            )
-            state["lock_active"] = 0.0
+        self.overlay_feedback_manager.update_feedback(
+            self.current_car, self.car_overlay_feedback, self.show_overlay_feedback.get()
+        )
 
     def open_timing_window(self):
         """Open timing configuration window."""
@@ -2276,15 +2060,7 @@ class iRacingControlApp:
         self.save_config()
 
     def _perform_pending_scan(self):
-        """Execute a deferred scan request set before restarting."""
-        if consume_pending_scan():
-            self.pending_scan_on_start = True
-
-        if self.pending_scan_on_start:
-            self.skip_race_restart_once = True
-            self.pending_scan_on_start = False
-            self.save_config()
-            self.root.after(50, self.scan_driver_controls)
+        self.lifecycle_manager.perform_pending_scan()
 
     def schedule_save(self):
         """Schedule configuration save."""
@@ -2376,296 +2152,49 @@ class iRacingControlApp:
         self.current_track = data.get("current_track", "")
 
     def _set_voice_tuning_vars(self, tuning: Dict[str, Any]):
-        """Populate Tk variables with stored voice tuning values."""
-
-        self.voice_ambient_duration.set(
-            tuning.get("ambient_duration", VOICE_TUNING_DEFAULTS["ambient_duration"])
-        )
-        self.voice_initial_timeout.set(
-            tuning.get("initial_timeout", VOICE_TUNING_DEFAULTS["initial_timeout"])
-        )
-        self.voice_continuous_timeout.set(
-            tuning.get(
-                "continuous_timeout",
-                VOICE_TUNING_DEFAULTS["continuous_timeout"]
-            )
-        )
-        self.voice_phrase_time_limit.set(
-            tuning.get(
-                "phrase_time_limit",
-                VOICE_TUNING_DEFAULTS["phrase_time_limit"]
-            )
-        )
-
-        energy_threshold = tuning.get("energy_threshold")
-        self.voice_energy_threshold.set(
-            "" if energy_threshold in {None, ""} else str(energy_threshold)
-        )
-        self.voice_dynamic_energy.set(
-            tuning.get("dynamic_energy", VOICE_TUNING_DEFAULTS["dynamic_energy"])
-        )
+        self.voice_control.set_voice_tuning_vars(tuning)
 
     # ------------------------------------------------------------------
     # Voice helpers
     # ------------------------------------------------------------------
     def _make_single_action(self, controller: GenericController, target: float):
-        """Create an action that adjusts a single controller to a target."""
-        return lambda: threading.Thread(
-            target=controller.adjust_to_target,
-            args=(target,),
-            daemon=True
-        ).start()
+        return self.voice_control._make_single_action(controller, target)
 
     def _make_combo_action(self, values: Dict[str, str]):
-        """Create an action that adjusts multiple controllers at once."""
-
-        def combo_action():
-            if self.app_state != "RUNNING":
-                return
-
-            for var_name, val_str in values.items():
-                if var_name in self.controllers and val_str:
-                    try:
-                        target = float(val_str)
-                    except Exception:
-                        continue
-
-                    ctrl = self.controllers[var_name]
-                    threading.Thread(
-                        target=ctrl.adjust_to_target,
-                        args=(target,),
-                        daemon=True
-                    ).start()
-
-        return combo_action
+        return self.voice_control._make_combo_action(values)
 
     def _build_voice_phrase_map(self) -> Dict[str, Callable]:
-        """Collect current voice phrases mapped to their actions."""
-        voice_phrases: Dict[str, Callable] = {}
-
-        for var_name, tab in self.tabs.items():
-            config = tab.get_config()
-            controller = self.controllers[var_name]
-
-            for preset in config.get("presets", []):
-                val_str = preset.get("val")
-                if not val_str:
-                    continue
-
-                try:
-                    target = float(val_str)
-                except Exception:
-                    continue
-
-                phrase = preset.get("voice_phrase", "").strip().lower()
-                if phrase:
-                    voice_phrases[phrase] = self._make_single_action(
-                        controller,
-                        target
-                    )
-
-        if self.combo_tab:
-            combo_config = self.combo_tab.get_config()
-
-            for preset in combo_config.get("presets", []):
-                values = preset.get("vals", {})
-                phrase = preset.get("voice_phrase", "").strip().lower()
-                if not phrase:
-                    continue
-
-                voice_phrases[phrase] = self._make_combo_action(values)
-
-        return voice_phrases
+        return self.voice_control._build_voice_phrase_map()
 
     def _format_vosk_status(self) -> str:
-        """Return a user-friendly status string for Vosk usage."""
-        engine = self.voice_engine.get()
-        if engine != "vosk":
-            return "Using Windows speech recognizer"
-
-        if not HAS_VOSK:
-            return "Vosk not installed"
-
-        model_path = self.vosk_model_path.get()
-        if not model_path:
-            return "Select a Vosk model folder"
-
-        if voice_listener._vosk_error:
-            return f"Model error: {voice_listener._vosk_error}"
-
-        if voice_listener.vosk_model is not None:
-            name = os.path.basename(model_path.rstrip(os.sep)) or model_path
-            return f"Vosk model: {name}"
-
-        return "Loading Vosk model..."
+        return self.voice_control.format_vosk_status()
 
     def on_voice_engine_changed(self):
-        """Handle engine dropdown changes."""
-        selection = (
-            self.voice_engine_combo.get() if self.voice_engine_combo else self.voice_engine.get()
-        )
-        if selection not in {"speech", "vosk"}:
-            selection = "speech"
-
-        if selection == "vosk" and not HAS_VOSK:
-            selection = "speech"
-
-        self.voice_engine.set(selection)
-        self._update_voice_controls()
-        self.register_current_listeners()
+        self.voice_control.on_voice_engine_changed()
 
     def choose_vosk_model(self):
-        """Prompt the user to select a Vosk model directory."""
-        path = filedialog.askdirectory(title="Select Vosk model folder")
-        if not path:
-            return
-
-        self.vosk_model_path.set(path)
-        self._update_voice_controls()
-        self.register_current_listeners()
+        self.voice_control.choose_vosk_model()
 
     def _update_voice_controls(self):
-        """Refresh UI state and listener config for voice engine selection."""
-        voice_listener.update_tuning(self._voice_tuning_config())
-        self._apply_audio_preferences()
-        engine = self.voice_engine.get()
-        if engine == "vosk" and not HAS_VOSK:
-            engine = "speech"
-            self.voice_engine.set(engine)
-
-            if self.voice_engine_combo:
-                self.voice_engine_combo.set(engine)
-
-        if engine == "vosk":
-            voice_listener.set_engine(engine, self.vosk_model_path.get())
-        else:
-            voice_listener.set_engine("speech", "")
-
-        btn_state = "normal" if engine == "vosk" and HAS_VOSK else "disabled"
-        if self.btn_vosk_model:
-            self.btn_vosk_model.config(state=btn_state)
-        self.vosk_status_var.set(self._format_vosk_status())
+        self.voice_control.update_voice_controls()
 
     def open_voice_test_dialog(self):
-        """Open the dialog that validates configured voice commands."""
-        if not HAS_SPEECH:
-            messagebox.showinfo(
-                "Voice unavailable",
-                "Install the 'speech_recognition' package to enable voice control."
-            )
-            return
-
-        phrases_map = self._build_voice_phrase_map()
-        self.voice_phrase_map = phrases_map
-
-        if not phrases_map:
-            messagebox.showinfo(
-                "No macros found",
-                "Add phrases in the tabs to test voice commands."
-            )
-            return
-
-        VoiceTestDialog(self.root, self, phrases_map)
+        self.voice_control.open_voice_test_dialog()
 
     def on_voice_toggle(self):
-        """Persist and (re)register voice triggers when toggled."""
-
-        self.register_current_listeners()
-        self.schedule_save()
+        self.voice_control.on_voice_toggle()
 
     def register_current_listeners(self):
-        """Register keyboard/joystick listeners based on current config."""
-        self._clear_keyboard_hotkeys()
-        input_manager.listeners.clear()
-        voice_phrases: Dict[str, Callable] = {}
-
-        # Register individual tab presets
-        for var_name, tab in self.tabs.items():
-            config = tab.get_config()
-            controller = self.controllers[var_name]
-
-            for preset in config.get("presets", []):
-                bind = preset.get("bind")
-                val_str = preset.get("val")
-                if not val_str:
-                    continue
-
-                try:
-                    target = float(val_str)
-                except Exception:
-                    continue
-
-                action = self._make_single_action(controller, target)
-                if bind:
-                    if bind.startswith("KEY:"):
-                        key_name = bind.split(":", 1)[1].lower()
-                        handle = keyboard.add_hotkey(key_name, action)
-                        self._hotkey_handles.append(handle)
-                    else:
-                        input_manager.listeners[bind] = action
-
-                phrase = preset.get("voice_phrase", "").strip().lower()
-                if phrase:
-                    voice_phrases[phrase] = action
-
-        # Register combo presets
-        if self.combo_tab:
-            combo_config = self.combo_tab.get_config()
-
-            for preset in combo_config.get("presets", []):
-                bind = preset.get("bind")
-                values = preset.get("vals", {})
-
-                action = self._make_combo_action(values)
-                if bind:
-                    if bind.startswith("KEY:"):
-                        key_name = bind.split(":", 1)[1].lower()
-                        handle = keyboard.add_hotkey(key_name, action)
-                        self._hotkey_handles.append(handle)
-                    else:
-                        input_manager.listeners[bind] = action
-
-                phrase = preset.get("voice_phrase", "").strip().lower()
-                if phrase:
-                    voice_phrases[phrase] = action
-
-        self.voice_phrase_map = voice_phrases
-
-        input_manager.active = (self.app_state == "RUNNING")
-        if self.app_state != "RUNNING":
-            voice_listener.set_enabled(False)
-        elif self.use_voice.get():
-            voice_listener.update_tuning(self._voice_tuning_config())
-            voice_listener.set_engine(
-                self.voice_engine.get(),
-                self.vosk_model_path.get()
-            )
-            voice_listener.set_phrases(self.voice_phrase_map)
-            voice_listener.set_enabled(True)
-        else:
-            voice_listener.set_enabled(False)
+        self.voice_control.register_current_listeners()
 
     def _refresh_controller_ir(self):
         """Ensure all controllers use the latest IRSDK handle."""
         for controller in self.controllers.values():
             controller.ir = self.ir
+        self.overlay_feedback_manager.set_ir(self.ir)
 
     def _clear_keyboard_hotkeys(self):
-        """Remove all keyboard hotkeys registered by the app."""
-        if not hasattr(self, "_hotkey_handles"):
-            self._hotkey_handles: List[Any] = []
-
-        for handle in self._hotkey_handles:
-            try:
-                keyboard.remove_hotkey(handle)
-            except Exception:
-                pass
-        self._hotkey_handles.clear()
-
-        try:
-            keyboard.unhook_all_hotkeys()
-        except Exception:
-            pass
+        self.voice_control.clear_keyboard_hotkeys()
 
     def _apply_inline_config(
         self,
@@ -2687,28 +2216,7 @@ class iRacingControlApp:
                 pass
 
     def restore_defaults(self):
-        """Delete the configuration file and restart the app after confirmation."""
-        if not messagebox.askyesno(
-            "Restore Defaults",
-            "This will delete your configuration file and restart the app. Continue?"
-        ):
-            return
-
-        try:
-            if os.path.exists(CONFIG_FILE):
-                os.remove(CONFIG_FILE)
-        except Exception as exc:
-            messagebox.showerror(
-                "Error",
-                f"Failed to delete config: {exc}"
-            )
-            return
-
-        messagebox.showinfo(
-            "Defaults Restored",
-            "Configuration reset. The application will restart now."
-        )
-        restart_program()
+        self.lifecycle_manager.restore_defaults()
 
 
 # ======================================================================

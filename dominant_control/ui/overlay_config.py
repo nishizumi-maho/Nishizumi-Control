@@ -306,7 +306,7 @@ class OverlayConfigTab(tk.Frame):
                 lambda _event, vn=var_name: self._on_overlay_row_change(vn)
             )
 
-        self.app.car_overlay_config[car_name] = overlay_config
+        self.app.preset_manager.car_overlay_config[car_name] = overlay_config
         self._collect_feedback_for_car(car_name)
         self.app.overlay.rebuild_monitor(overlay_config)
         self.app.save_config()
@@ -338,7 +338,7 @@ class OverlayConfigTab(tk.Frame):
     def _on_overlay_row_change(self, var_name: str):
         """Apply live updates when overlay rows change."""
         car = self.app.current_car or "Generic Car"
-        config = self.app.car_overlay_config.get(car, {})
+        config = self.app.preset_manager.car_overlay_config.get(car, {})
         row = self.var_rows.get(var_name)
         if not row:
             return
@@ -346,7 +346,7 @@ class OverlayConfigTab(tk.Frame):
         show = row["show_var"].get()
         label = row["entry"].get().strip() or var_name.replace("dc", "")
         config[var_name] = {"show": show, "label": label}
-        self.app.car_overlay_config[car] = config
+        self.app.preset_manager.car_overlay_config[car] = config
         self.app.overlay.rebuild_monitor(config)
         self.app.schedule_save()
 
@@ -360,14 +360,14 @@ class OverlayConfigTab(tk.Frame):
         Returns:
             Dict of var_name -> {"show": bool, "label": str}
         """
-        config = self.app.car_overlay_config.get(car_name, {})
+        config = self.app.preset_manager.car_overlay_config.get(car_name, {})
 
         for var_name, row_config in self.var_rows.items():
             show = row_config["show_var"].get()
             label = row_config["entry"].get().strip() or var_name.replace("dc", "")
             config[var_name] = {"show": show, "label": label}
 
-        self.app.car_overlay_config[car_name] = config
+        self.app.preset_manager.car_overlay_config[car_name] = config
         self._collect_feedback_for_car(car_name)
         self.app.overlay.rebuild_monitor(config)
         return config
@@ -376,7 +376,7 @@ class OverlayConfigTab(tk.Frame):
         """Load per-car feedback thresholds into the UI fields."""
 
         cfg = DEFAULT_OVERLAY_FEEDBACK.copy()
-        cfg.update(self.app.car_overlay_feedback.get(car_name, {}))
+        cfg.update(self.app.preset_manager.car_overlay_feedback.get(car_name, {}))
 
         for key, var in self.feedback_vars.items():
             try:
@@ -396,5 +396,5 @@ class OverlayConfigTab(tk.Frame):
             except Exception:
                 cfg[key] = DEFAULT_OVERLAY_FEEDBACK[key]
 
-        self.app.car_overlay_feedback[car_name] = cfg
+        self.app.preset_manager.car_overlay_feedback[car_name] = cfg
         return cfg

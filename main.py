@@ -61,6 +61,7 @@ from dominant_control.input_engine import (
     _normalize_timing_config,
 )
 from dominant_control.input_manager import input_manager
+from dominant_control.preset_manager import PresetManager
 from dominant_control.tts import speak_text
 from dominant_control.ui.combo_tab import ComboTab
 from dominant_control.ui.control_tab import ControlTab
@@ -111,12 +112,6 @@ class iRacingControlApp:
         self.overlay_tab: Optional[OverlayConfigTab] = None
         self.voice_window: Optional[tk.Toplevel] = None
 
-        # Presets: saved_presets[car][track] = config
-        self.saved_presets: Dict[str, Dict[str, Dict[str, Any]]] = {}
-        
-        # Overlay config per car
-        self.car_overlay_config: Dict[str, Dict[str, Dict[str, Any]]] = {}
-        self.car_overlay_feedback: Dict[str, Dict[str, float]] = {}
         self.show_overlay_feedback = tk.BooleanVar(value=True)
 
         # Active variables for current car
@@ -129,11 +124,6 @@ class iRacingControlApp:
         self.scans_since_restart = 0
         self.pending_scan_on_start = False
         self.skip_race_restart_once = False
-        self._last_auto_pair: Tuple[str, str] = ("", "")
-
-        # Auto-load tracking
-        self.auto_load_attempted: set = set()
-
         # HUD overlay
         self.overlay_manager = OverlayManager(root, self.ir)
         self.overlay = self.overlay_manager.overlay
@@ -177,6 +167,10 @@ class iRacingControlApp:
         self.messagebox = messagebox
 
         # Managers
+        self.overlay_feedback_manager = OverlayFeedbackManager(
+            self.ir, self.notify_overlay_status
+        )
+        self.preset_manager = PresetManager(self)
         self.device_manager = DeviceAllowlistManager(self)
         self.lifecycle_manager = LifecycleManager(self)
         self.voice_control = VoiceControlManager(self)
@@ -198,7 +192,12 @@ class iRacingControlApp:
         self.overlay_manager.start()
 
         # Start background loops
-        self.root.after(2000, self.auto_preset_loop)
+        self.preset_manager.start_auto_preset_loop()
+        self.update_overlay_loop()
+
+        # Show overlay if it was visible
+        if self.overlay_visible:
+            self.overlay.deiconify()
 
         # Activate input manager
         input_manager.active = (self.app_state == "RUNNING")
@@ -386,7 +385,7 @@ class iRacingControlApp:
         tk.Label(selector_frame, text="Car:").pack(side="left")
         self.combo_car = ttk.Combobox(selector_frame, width=30)
         self.combo_car.pack(side="left", padx=5)
-        self.combo_car.bind("<<ComboboxSelected>>", self.on_car_selected)
+        self.combo_car.bind("<<ComboboxSelected>>", self.preset_manager.on_car_selected)
 
         tk.Label(selector_frame, text="Track:").pack(side="left")
         self.combo_track = ttk.Combobox(selector_frame, width=30)
@@ -398,21 +397,21 @@ class iRacingControlApp:
         tk.Button(
             actions_frame,
             text="Load",
-            command=self.action_load_preset,
+            command=self.preset_manager.load_selected_preset,
             bg="#e0e0e0"
         ).pack(side="left", expand=True, fill="x", padx=2)
 
         tk.Button(
             actions_frame,
             text="Save Current",
-            command=self.action_save_preset,
+            command=self.preset_manager.save_preset,
             bg="#ADD8E6"
         ).pack(side="left", expand=True, fill="x", padx=2)
 
         tk.Button(
             actions_frame,
             text="Delete",
-            command=self.action_delete_preset,
+            command=self.preset_manager.delete_preset,
             bg="#ffcccc"
         ).pack(side="left", expand=True, fill="x", padx=2)
 
@@ -455,7 +454,7 @@ class iRacingControlApp:
             self.active_vars = [("dcBrakeBias", True)]
 
         self.rebuild_tabs(self.active_vars)
-        self.update_preset_ui()
+        self.preset_manager.update_preset_ui()
 
     # ------------------------------------------------------------------
     # Options UI
@@ -516,296 +515,6 @@ class iRacingControlApp:
 
     def update_allowed_devices(self, new_list: List[str]):
         self.device_manager.update_allowed_devices(new_list)
-
-    # Car/Track/Preset management
-    def update_preset_ui(self):
-        """Update car/track combo boxes."""
-        cars = sorted(list(self.saved_presets.keys()))
-        self.combo_car["values"] = [c for c in cars if c]
-
-        if self.current_car and self.current_car in cars:
-            self.combo_car.set(self.current_car)
-            self.on_car_selected(None)
-
-    def on_car_selected(self, _event):
-        """Handle car selection."""
-        car = self.combo_car.get()
-        if car in self.saved_presets:
-            tracks = sorted([
-                t for t in self.saved_presets[car].keys()
-                if t not in {"_overlay", "_overlay_feedback"}
-            ])
-            self.combo_track["values"] = tracks
-        else:
-            self.combo_track["values"] = []
-
-        self.current_car = car
-        self.sync_overlay_manager()
-
-    def auto_fill_ui(self, car: str, track: str):
-        """Auto-fill car and track in UI."""
-        self.current_car = car
-        self.current_track = track
-
-        self.combo_car.set(car)
-        self.on_car_selected(None)
-        self.combo_track.set(track)
-        self.sync_overlay_manager()
-
-    def action_save_preset(self):
-        """Save current configuration as preset."""
-        car = self.combo_car.get().strip()
-        track = self.combo_track.get().strip()
-
-        if not car or not track:
-            messagebox.showwarning("Error", "Define Car and Track.")
-            return
-
-        # Collect overlay config
-        self.overlay_tab.collect_for_car(car)
-
-        if car not in self.car_overlay_feedback:
-            self.car_overlay_feedback[car] = DEFAULT_OVERLAY_FEEDBACK.copy()
-
-        # Collect tab configs
-        current_data = {
-            "active_vars": self.active_vars,
-            "tabs": {},
-            "combo": self.combo_tab.get_config() if self.combo_tab else {}
-        }
-
-        for var_name, tab in self.tabs.items():
-            current_data["tabs"][var_name] = tab.get_config()
-
-        if car not in self.saved_presets:
-            self.saved_presets[car] = {}
-
-        self.saved_presets[car][track] = current_data
-
-        # Save overlay config
-        if car not in self.car_overlay_config:
-            self.car_overlay_config[car] = {}
-        self.saved_presets[car]["_overlay"] = self.car_overlay_config[car]
-        self.saved_presets[car]["_overlay_feedback"] = \
-            self.car_overlay_feedback.get(car, DEFAULT_OVERLAY_FEEDBACK.copy())
-
-        self.save_config()
-        # Allow auto-detection to load this preset the next time we see the pair
-        self.auto_load_attempted.discard((car, track))
-        # Immediately refresh listeners when saving the active car/track
-        if (car, track) == (self.current_car, self.current_track):
-            self.register_current_listeners()
-        self.update_preset_ui()
-        messagebox.showinfo("Saved", f"Preset saved for {car} @ {track}")
-
-    def load_specific_preset(self, car: str, track: str):
-        """Load a specific car/track preset."""
-        if car not in self.saved_presets or track not in self.saved_presets[car]:
-            return
-
-        data = self.saved_presets[car][track]
-
-        # Load active variables
-        active_vars = data.get("active_vars")
-        if active_vars:
-            self.rebuild_tabs(active_vars)
-
-        # Load tab configs
-        tabs_data = data.get("tabs", {})
-        for var_name, config in tabs_data.items():
-            if var_name in self.tabs:
-                self.tabs[var_name].set_config(config)
-
-        # Load combo config
-        combo_data = data.get("combo")
-        if self.combo_tab and combo_data:
-            self.combo_tab.set_config(combo_data)
-
-        # Load overlay config
-        overlay_config = self.saved_presets[car].get("_overlay", {})
-        self.car_overlay_config[car] = overlay_config
-        self.car_overlay_feedback[car] = self.saved_presets[car].get(
-            "_overlay_feedback", self.car_overlay_feedback.get(
-                car, DEFAULT_OVERLAY_FEEDBACK.copy()
-            )
-        )
-        self.overlay_tab.load_for_car(car, self.active_vars, overlay_config)
-
-        self.sync_overlay_manager()
-        self.register_current_listeners()
-        print(f"[Preset] Loaded {car} / {track}")
-
-    def action_load_preset(self):
-        """Load selected preset."""
-        car = self.combo_car.get()
-        track = self.combo_track.get()
-
-        if not car or not track:
-            return
-
-        self.current_car = car
-        self.current_track = track
-        self.load_specific_preset(car, track)
-
-    def action_delete_preset(self):
-        """Delete selected preset."""
-        car = self.combo_car.get()
-        track = self.combo_track.get()
-
-        if not car or not track:
-            return
-
-        if car in self.saved_presets and track in self.saved_presets[car]:
-            if not messagebox.askyesno(
-                "Confirm", 
-                f"Delete preset for {car} @ {track}?"
-            ):
-                return
-
-            del self.saved_presets[car][track]
-
-            # Remove car if no more tracks
-            if not [
-                t for t in self.saved_presets[car].keys()
-                if t not in {"_overlay", "_overlay_feedback"}
-            ]:
-                del self.saved_presets[car]
-                if car in self.car_overlay_config:
-                    del self.car_overlay_config[car]
-                if car in self.car_overlay_feedback:
-                    del self.car_overlay_feedback[car]
-
-            self.save_config()
-            self.update_preset_ui()
-            self.combo_track.set("")
-            self.current_track = ""
-
-    def auto_preset_loop(self):
-        """Background loop for auto-detecting car/track."""
-        if not (self.auto_detect.get() or self.auto_restart_on_race.get()):
-            self.root.after(2000, self.auto_preset_loop)
-            return
-
-        try:
-            with self.ir_lock:
-                if not getattr(self.ir, "is_initialized", False):
-                    self.ir.startup()
-
-            if not getattr(self.ir, "is_initialized", False):
-                self.root.after(2000, self.auto_preset_loop)
-                return
-
-            session_type = self._get_session_type()
-            if self.lifecycle_manager.handle_session_change(session_type):
-                return
-
-            if not self.auto_detect.get():
-                self.root.after(2000, self.auto_preset_loop)
-                return
-
-            driver_info = self.ir["DriverInfo"]
-            if not driver_info:
-                self.root.after(2000, self.auto_preset_loop)
-                return
-
-            idx = driver_info["DriverCarIdx"]
-            raw_car = driver_info["Drivers"][idx]["CarScreenName"]
-
-            weekend = self.ir["WeekendInfo"]
-            if not weekend:
-                self.root.after(2000, self.auto_preset_loop)
-                return
-
-            raw_track = weekend["TrackDisplayName"]
-
-            # Clean names
-            car_clean = "".join(
-                c for c in raw_car
-                if c.isalnum() or c in " -_"
-            )
-            track_clean = "".join(
-                c for c in raw_track
-                if c.isalnum() or c in " -_"
-            )
-
-            current_pair = (car_clean, track_clean)
-
-            if current_pair != self._last_auto_pair:
-                self._last_auto_pair = current_pair
-                self.current_car, self.current_track = car_clean, track_clean
-                print(f"[AutoDetect] {car_clean} @ {track_clean}")
-
-                self.auto_fill_ui(car_clean, track_clean)
-                self.sync_overlay_manager()
-
-                # Create skeleton if doesn't exist
-                if car_clean not in self.saved_presets:
-                    self.saved_presets[car_clean] = {}
-
-                if "_overlay" not in self.saved_presets[car_clean]:
-                    self.saved_presets[car_clean]["_overlay"] = \
-                        self.car_overlay_config.get(car_clean, {})
-
-                if "_overlay_feedback" not in self.saved_presets[car_clean]:
-                    self.saved_presets[car_clean]["_overlay_feedback"] = \
-                        self.car_overlay_feedback.get(
-                            car_clean, DEFAULT_OVERLAY_FEEDBACK.copy()
-                        )
-
-                if track_clean not in self.saved_presets[car_clean]:
-                    self.saved_presets[car_clean][track_clean] = {
-                        "active_vars": None,
-                        "tabs": {},
-                        "combo": {}
-                    }
-
-                self.save_config()
-
-                # Auto-load once
-                if (car_clean, track_clean) not in self.auto_load_attempted:
-                    self.auto_load_attempted.add((car_clean, track_clean))
-                    if self.saved_presets[car_clean][track_clean].get(
-                        "active_vars"
-                    ):
-                        self.load_specific_preset(car_clean, track_clean)
-
-        except Exception as e:
-            print(f"[AutoDetect] Error: {e}")
-
-        self.root.after(2000, self.auto_preset_loop)
-
-    def _get_session_type(self) -> str:
-        """Return the current session type if available."""
-        try:
-            session_info = self.ir["SessionInfo"]
-        except Exception:
-            return ""
-
-        session_num = None
-        try:
-            session_num = int(self.ir["SessionNum"])
-        except Exception:
-            pass
-
-        try:
-            sessions = session_info.get("Sessions") if session_info else None
-            if isinstance(sessions, list):
-                if session_num is not None and 0 <= session_num < len(sessions):
-                    session_type = sessions[session_num].get("SessionType", "")
-                    if session_type:
-                        return session_type
-
-                for entry in sessions:
-                    session_type = entry.get("SessionType", "")
-                    if session_type:
-                        return session_type
-        except Exception:
-            pass
-
-        return ""
-
-    def _handle_session_change(self, session_type: str) -> bool:
-        return self.lifecycle_manager.handle_session_change(session_type)
 
     def scan_driver_controls(self):
         """Scan for dc* driver control variables in current car."""
@@ -933,47 +642,22 @@ class iRacingControlApp:
         track = self.combo_track.get().strip() or \
                 self.current_track or "Generic Track"
 
+
         self.current_car, self.current_track = car, track
-        self.auto_fill_ui(car, track)
+        self.preset_manager.auto_fill_ui(car, track)
 
-        if car not in self.saved_presets:
-            self.saved_presets[car] = {}
-
-        if track not in self.saved_presets[car]:
-            self.saved_presets[car][track] = {
-                "active_vars": self.active_vars,
-                "tabs": {},
-                "combo": {}
-            }
-        else:
-            self.saved_presets[car][track]["active_vars"] = self.active_vars
-
-        # Overlay config
-        if "_overlay" not in self.saved_presets[car]:
-            self.saved_presets[car]["_overlay"] = \
-                self.car_overlay_config.get(car, {})
-
-        if "_overlay_feedback" not in self.saved_presets[car]:
-            self.saved_presets[car]["_overlay_feedback"] = \
-                self.car_overlay_feedback.get(
-                    car, DEFAULT_OVERLAY_FEEDBACK.copy()
-                )
-
-        self.car_overlay_config[car] = self.saved_presets[car]["_overlay"]
-        self.car_overlay_feedback[car] = self.saved_presets[car]["_overlay_feedback"]
-        self.overlay_tab.load_for_car(
-            car,
-            self.active_vars,
-            self.car_overlay_config[car]
+        self.preset_manager.update_preset_active_vars(
+            car, track, self.active_vars
         )
+        self.preset_manager.update_overlay_config(car)
 
         self.sync_overlay_manager()
 
         # Reload saved bindings/macros for this car/track so they remain active
-        preset_data = self.saved_presets[car][track]
+        preset_data = self.preset_manager.saved_presets[car][track]
         if preset_data.get("tabs") or preset_data.get("combo"):
             # Load preset will rebuild tabs with configs and re-register listeners
-            self.load_specific_preset(car, track)
+            self.preset_manager.load_specific_preset(car, track)
         else:
             # Even without saved presets, ensure any current bindings stay active.
             # If this rescan is for the same car/track, reuse inline config.
@@ -981,7 +665,7 @@ class iRacingControlApp:
                 self._apply_inline_config(fallback_tabs, fallback_combo)
             self.register_current_listeners()
 
-        self.update_preset_ui()
+        self.preset_manager.update_preset_ui()
         self.save_config()
 
         self.scans_since_restart += 1
@@ -1045,24 +729,11 @@ class iRacingControlApp:
         # Load overlay for current car
         car = self.current_car or "Generic Car"
 
-        if car not in self.saved_presets:
-            self.saved_presets[car] = {}
-
-        if "_overlay" not in self.saved_presets[car]:
-            self.saved_presets[car]["_overlay"] = \
-                self.car_overlay_config.get(car, {})
-        if "_overlay_feedback" not in self.saved_presets[car]:
-            self.saved_presets[car]["_overlay_feedback"] = \
-                self.car_overlay_feedback.get(
-                    car, DEFAULT_OVERLAY_FEEDBACK.copy()
-                )
-
-        self.car_overlay_config[car] = self.saved_presets[car]["_overlay"]
-        self.car_overlay_feedback[car] = self.saved_presets[car]["_overlay_feedback"]
+        self.preset_manager.ensure_overlay_defaults(car)
         self.overlay_tab.load_for_car(
             car,
             self.active_vars,
-            self.car_overlay_config[car]
+            self.preset_manager.car_overlay_config.get(car, {})
         )
 
         # Set editing state
@@ -1074,6 +745,68 @@ class iRacingControlApp:
 
         self.register_current_listeners()
 
+    def toggle_overlay(self):
+        """Toggle HUD overlay visibility."""
+        if self.overlay.winfo_viewable():
+            self.overlay.withdraw()
+            self.overlay_visible = False
+        else:
+            self.overlay.deiconify()
+            self.overlay_visible = True
+
+    def notify_overlay_status(self, text: str, color: str):
+        """Update overlay status text temporarily."""
+        self.ui(self.overlay.update_status_text, text, color)
+        self.ui(
+            self.root.after,
+            2000,
+            lambda: self.overlay.update_status_text("HUD Ready", "white")
+        )
+
+    def update_overlay_loop(self):
+        """Background loop to update HUD values."""
+        if self.overlay_visible:
+            data = {}
+            car = self.current_car or "Generic Car"
+            config = self.preset_manager.car_overlay_config.get(car, {})
+
+            for var_name, controller in self.controllers.items():
+                var_config = config.get(var_name, {})
+                if not var_config.get("show", False):
+                    continue
+                value = controller.read_telemetry()
+                data[var_name] = value
+
+            self.overlay.update_monitor_values(data)
+
+        self._update_overlay_feedback()
+
+        self.root.after(100, self.update_overlay_loop)
+
+    def _read_ir_value(self, key: str):
+        return self.overlay_feedback_manager._read_ir_value(key)
+
+    @staticmethod
+    def _safe_float(value: Any, default: float = 0.0) -> float:
+        return OverlayFeedbackManager._safe_float(value, default)
+
+    def _bool_from_keys(self, keys: List[str]) -> bool:
+        return self.overlay_feedback_manager._bool_from_keys(keys)
+
+    def _slip_values(self) -> List[float]:
+        return self.overlay_feedback_manager._slip_values()
+
+    def _push_overlay_alert(
+        self, message: str, color: str, cfg: Dict[str, float], now: float
+    ) -> None:
+        self.overlay_feedback_manager._push_overlay_alert(message, color, cfg, now)
+
+    def _update_overlay_feedback(self):
+        self.overlay_feedback_manager.update_feedback(
+            self.current_car,
+            self.preset_manager.car_overlay_feedback,
+            self.show_overlay_feedback.get(),
+        )
 
     def open_timing_window(self):
         """Open timing configuration window."""
@@ -1093,13 +826,84 @@ class iRacingControlApp:
 
     def save_config(self):
         """Save configuration to disk."""
-        self.config_service.save()
+        # Collect overlay config
+        car = self.current_car or "Generic Car"
+        if self.overlay_tab:
+            self.overlay_tab.collect_for_car(car)
+
+        data = {
+            "global_timing": GLOBAL_TIMING,
+            "hud_style": self.overlay.style_cfg,
+            "show_overlay_feedback": self.show_overlay_feedback.get(),
+            "use_keyboard_only": self.use_keyboard_only.get(),
+            "use_tts": self.use_tts.get(),
+            "use_voice": self.use_voice.get(),
+            "voice_engine": self.voice_engine.get(),
+            "vosk_model_path": self.vosk_model_path.get(),
+            "voice_tuning": self._voice_tuning_config(),
+            "microphone_device": self.microphone_device.get(),
+            "audio_output_device": self.audio_output_device.get(),
+            "auto_detect": self.auto_detect.get(),
+            "auto_restart_on_rescan": self.auto_restart_on_rescan.get(),
+            "auto_restart_on_race": self.auto_restart_on_race.get(),
+            "pending_scan_on_start": self.pending_scan_on_start,
+            "allowed_devices": input_manager.allowed_devices,
+            "saved_presets": self.preset_manager.saved_presets,
+            "car_overlay_config": self.preset_manager.car_overlay_config,
+            "car_overlay_feedback": self.preset_manager.car_overlay_feedback,
+            "active_vars": self.active_vars,
+            "current_car": self.current_car,
+            "current_track": self.current_track
+        }
+
+        try:
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4)
+        except Exception as e:
+            print(f"[SAVE] Error saving config: {e}")
 
     def load_config(self):
         """Load configuration from disk."""
         self.config_service.load()
 
-        self.sync_overlay_manager()
+        GLOBAL_TIMING = _normalize_timing_config(
+            data.get("global_timing", GLOBAL_TIMING)
+        )
+
+        style = data.get("hud_style")
+        if style:
+            self.overlay.style_cfg.update(style)
+            self.overlay.apply_style(self.overlay.style_cfg)
+
+        self.show_overlay_feedback.set(data.get("show_overlay_feedback", True))
+
+        self.use_keyboard_only.set(data.get("use_keyboard_only", False))
+        self.use_tts.set(data.get("use_tts", False))
+        self.use_voice.set(data.get("use_voice", False))
+        self.voice_engine.set(data.get("voice_engine", "speech"))
+        self.vosk_model_path.set(data.get("vosk_model_path", ""))
+        self.microphone_device.set(data.get("microphone_device", -1))
+        self.audio_output_device.set(data.get("audio_output_device", -1))
+        self._set_voice_tuning_vars(
+            data.get("voice_tuning", VOICE_TUNING_DEFAULTS)
+        )
+        self.auto_detect.set(data.get("auto_detect", True))
+        self.auto_restart_on_rescan.set(data.get("auto_restart_on_rescan", True))
+        self.auto_restart_on_race.set(data.get("auto_restart_on_race", True))
+        self.pending_scan_on_start = data.get("pending_scan_on_start", False)
+
+        input_manager.allowed_devices = data.get("allowed_devices", [])
+
+        self.preset_manager.saved_presets = data.get("saved_presets", {})
+        self.preset_manager.car_overlay_config = data.get(
+            "car_overlay_config", {}
+        )
+        self.preset_manager.car_overlay_feedback = data.get(
+            "car_overlay_feedback", self.preset_manager.car_overlay_feedback
+        )
+        self.active_vars = data.get("active_vars", [])
+        self.current_car = data.get("current_car", "")
+        self.current_track = data.get("current_track", "")
 
     def _set_voice_tuning_vars(self, tuning: Dict[str, Any]):
         self.voice_control.set_voice_tuning_vars(tuning)

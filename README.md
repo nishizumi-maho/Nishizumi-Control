@@ -44,7 +44,7 @@ See [`requirements.txt`](requirements.txt) for the full Python dependency list.
 1. Install Python 3.10+ and Visual C++ Build Tools (for PyAudio) if missing.
 2. Clone or download this repository.
 3. Install dependencies: `python -m pip install -r requirements.txt`.
-4. Start the app: `python main.py`.
+4. Start the app: `python FINALOK.py`.
 
 ## Quick Start (5 Minutes)
 1. **Start order (for best FFB compatibility):** launch Dominant Control **before** starting iRacing. If you use only keyboard bindings, enable **Keyboard Only Mode** to avoid device conflicts entirely.

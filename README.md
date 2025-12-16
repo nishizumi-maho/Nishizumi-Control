@@ -38,13 +38,9 @@ See [`requirements.txt`](requirements.txt) for the full Python dependency list.
 - `docs/` — organized documentation hub with guides, reference material, and legal notes.
 - `archive/` — legacy utilities retained for reference.
 
-## Installation Options
-### Option A: Run the Windows Build
-1. Download the latest release archive.
-2. Extract anywhere (e.g., `C:\DominantControl\`).
-3. Launch `DominantControl.exe`.
+## Installation
 
-### Option B: Run From Source (Windows)
+### Run From Source (Windows)
 1. Install Python 3.10+ and Visual C++ Build Tools (for PyAudio) if missing.
 2. Clone or download this repository.
 3. Install dependencies: `python -m pip install -r requirements.txt`.

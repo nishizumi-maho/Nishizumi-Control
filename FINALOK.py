@@ -2279,6 +2279,10 @@ class GenericController:
         self.key_decrease = None
         self.update_status = status_callback
         self.app = app_ref
+        self._target_lock = threading.Lock()
+        self._requested_target: Optional[float] = None
+        self._clear_requested = False
+        self._worker_thread: Optional[threading.Thread] = None
 
     def read_telemetry(self) -> Optional[float]:
         """
@@ -2360,13 +2364,35 @@ class GenericController:
 
         return aligned
 
+    def request_target(self, target: float):
+        """Queue a target adjustment request, overriding any active target."""
+        with self._target_lock:
+            self._requested_target = target
+            self._clear_requested = False
+
+        if not self._worker_thread or not self._worker_thread.is_alive():
+            self._worker_thread = threading.Thread(
+                target=self._run_target_loop,
+                daemon=True
+            )
+            self._worker_thread.start()
+
+    def clear_target(self):
+        """Clear any pending target requests and stop adjusting."""
+        with self._target_lock:
+            self._requested_target = None
+            self._clear_requested = True
+
     def adjust_to_target(self, target: float):
         """
         Adjust variable to target value using discrete key presses.
-        
+
         Args:
             target: Target value to reach
         """
+        self.request_target(target)
+
+    def _run_target_loop(self):
         if self.running_action:
             return
 
@@ -2375,80 +2401,123 @@ class GenericController:
                 self.update_status("No keys configured", "red")
             if self.app:
                 self.app.notify_overlay_status(
-                    f"{self.var_name.replace('dc', '')}: No keys", 
+                    f"{self.var_name.replace('dc', '')}: No keys",
                     "red"
                 )
             return
 
         self.running_action = True
         short_name = self.var_name.replace("dc", "")
-
-        target = self._resolve_target(target)
-        if not self.is_float:
-            target = int(round(target))
-
-        if self.update_status:
-            self.update_status("Adjusting...", "orange")
-        if self.app:
-            self.app.notify_overlay_status(
-                f"Adjusting {short_name} -> {target}",
-                "orange"
-            )
-
-        timeout = time.time() + 8
+        active_request: Optional[float] = None
+        active_target: Optional[float] = None
+        timeout_deadline: Optional[float] = None
+        cancelled = False
+        cleared = False
         success = False
 
         try:
-            while time.time() < timeout:
-                # Abort if entering CONFIG mode
+            while True:
+                with self._target_lock:
+                    pending_target = self._requested_target
+                    cleared = self._clear_requested
+
+                if cleared or pending_target is None:
+                    break
+
+                if pending_target != active_request:
+                    active_request = pending_target
+                    active_target = self._resolve_target(pending_target)
+                    if not self.is_float:
+                        active_target = int(round(active_target))
+                    keep_trying = bool(
+                        self.app and self.app.keep_trying_targets.get()
+                    )
+                    timeout_deadline = None if keep_trying else time.time() + 8
+
+                    if self.update_status:
+                        self.update_status("Adjusting...", "orange")
+                    if self.app:
+                        self.app.notify_overlay_status(
+                            f"Adjusting {short_name} -> {active_target}",
+                            "orange"
+                        )
+
                 if self.app and self.app.app_state != "RUNNING":
+                    cancelled = True
+                    break
+
+                keep_trying = bool(
+                    self.app and self.app.keep_trying_targets.get()
+                )
+                if keep_trying:
+                    timeout_deadline = None
+                elif timeout_deadline is None:
+                    timeout_deadline = time.time() + 8
+                if not keep_trying and timeout_deadline and time.time() > timeout_deadline:
                     break
 
                 current = self.read_telemetry()
                 if current is None:
-                    break
+                    time.sleep(0.05)
+                    continue
 
-                diff = target - current
+                if active_target is None:
+                    time.sleep(0.05)
+                    continue
+
+                diff = active_target - current
                 abs_diff = abs(diff)
 
-                # Check if target reached
                 if self.is_float and abs_diff < 0.001:
                     success = True
-                    break
-                if not self.is_float and diff == 0:
+                elif not self.is_float and diff == 0:
                     success = True
+
+                if success:
+                    with self._target_lock:
+                        if self._requested_target == active_request:
+                            self._requested_target = None
                     break
 
-                # Press appropriate key
                 key = self.key_increase if diff > 0 else self.key_decrease
                 click_pulse(key, self.is_float)
                 time.sleep(0.02)
 
-        except Exception as e:
-            print(f"[GenericController] Exception: {e}")
+        except Exception as exc:
+            print(f"[GenericController] Exception: {exc}")
         finally:
             if success:
-                message = f"{short_name} OK ({target})"
+                message = f"{short_name} OK ({active_target})"
                 if self.update_status:
                     self.update_status("Ready", "green")
                 if self.app:
                     self.app.notify_overlay_status(message, "green")
                     if self.app.use_tts.get():
                         speak_text(message)
-            else:
-                status = "Cancelled" if (
-                    self.app and self.app.app_state != "RUNNING"
-                ) else "Failed"
-                
+            elif cancelled:
                 if self.update_status:
-                    self.update_status(status, "red")
+                    self.update_status("Cancelled", "red")
                 if self.app:
-                    status_msg = (
-                        f"{short_name} Cancelled" 
-                        if self.app.app_state != "RUNNING" 
-                        else f"{short_name} Failed"
+                    self.app.notify_overlay_status(
+                        f"{short_name} Cancelled",
+                        "red"
                     )
-                    self.app.notify_overlay_status(status_msg, "red")
+            elif cleared:
+                if self.update_status:
+                    self.update_status("Ready", "green")
+                if self.app:
+                    self.app.notify_overlay_status(
+                        f"{short_name} Cleared",
+                        "orange"
+                    )
+            else:
+                if self.update_status:
+                    self.update_status("Failed", "red")
+                if self.app:
+                    self.app.notify_overlay_status(
+                        f"{short_name} Failed",
+                        "red"
+                    )
 
             self.running_action = False
 
@@ -3494,6 +3563,9 @@ class iRacingControlApp:
         self.auto_detect = tk.BooleanVar(value=True)
         self.auto_restart_on_rescan = tk.BooleanVar(value=True)
         self.auto_restart_on_race = tk.BooleanVar(value=True)
+        self.keep_trying_targets = tk.BooleanVar(value=True)
+        self.clear_target_bind: Optional[str] = None
+        self.btn_clear_target_bind: Optional[tk.Button] = None
         self.voice_phrase_map: Dict[str, Callable] = {}
         self._voice_traces_attached = False
 
@@ -3722,6 +3794,27 @@ class iRacingControlApp:
             command=self.schedule_save
         ).pack(anchor="w", pady=2)
 
+        tk.Checkbutton(
+            stability_frame,
+            text="Keep trying to reach hotkey targets (no timeout)",
+            variable=self.keep_trying_targets,
+            command=self.schedule_save
+        ).pack(anchor="w", pady=2)
+
+        clear_frame = tk.Frame(stability_frame)
+        clear_frame.pack(fill="x", pady=4)
+        tk.Label(
+            clear_frame,
+            text="Clear target hotkey (optional):"
+        ).pack(side="left")
+        self.btn_clear_target_bind = tk.Button(
+            clear_frame,
+            text="Set Clear Hotkey",
+            width=18,
+            command=self._set_clear_target_bind
+        )
+        self.btn_clear_target_bind.pack(side="left", padx=6)
+
         # Car/Track manager
         presets_frame = tk.LabelFrame(
             self.root,
@@ -3805,6 +3898,7 @@ class iRacingControlApp:
 
         self.rebuild_tabs(self.active_vars)
         self.update_preset_ui()
+        self._refresh_clear_target_bind_button()
 
     # ------------------------------------------------------------------
     # Options UI
@@ -4167,6 +4261,52 @@ class iRacingControlApp:
     def focus_window(self):
         """Force focus to main window."""
         self.root.focus_force()
+
+    def _refresh_clear_target_bind_button(self):
+        """Update the clear-target hotkey button text/color."""
+        if not self.btn_clear_target_bind:
+            return
+
+        if self.clear_target_bind:
+            bg_color = "#90ee90" if "JOY" in self.clear_target_bind else "#ADD8E6"
+            self.btn_clear_target_bind.config(
+                text=self.clear_target_bind,
+                bg=bg_color
+            )
+        else:
+            self.btn_clear_target_bind.config(
+                text="Set Clear Hotkey",
+                bg="#f0f0f0"
+            )
+
+    def _set_clear_target_bind(self):
+        """Capture an optional hotkey for clearing target attempts."""
+        if self.app_state != "CONFIG":
+            messagebox.showinfo("Notice", "Enter CONFIG mode first.")
+            return
+
+        self.focus_window()
+        if self.btn_clear_target_bind:
+            self.btn_clear_target_bind.config(text="...", bg="yellow")
+        self.root.update_idletasks()
+
+        code = input_manager.capture_any_input()
+
+        if code and code != "CANCEL":
+            self.clear_target_bind = code
+        elif code == "CANCEL":
+            self.clear_target_bind = None
+
+        self._refresh_clear_target_bind_button()
+        if self.app_state == "RUNNING":
+            self.register_current_listeners()
+        self.schedule_save()
+
+    def clear_all_targets(self):
+        """Stop all active target adjustments."""
+        for controller in self.controllers.values():
+            controller.clear_target()
+        self.notify_overlay_status("Targets cleared", "orange")
 
     # Safe mode and device management
     def update_safe_mode(self):
@@ -5021,6 +5161,8 @@ class iRacingControlApp:
             "auto_detect": self.auto_detect.get(),
             "auto_restart_on_rescan": self.auto_restart_on_rescan.get(),
             "auto_restart_on_race": self.auto_restart_on_race.get(),
+            "keep_trying_targets": self.keep_trying_targets.get(),
+            "clear_target_bind": self.clear_target_bind,
             "pending_scan_on_start": self.pending_scan_on_start,
             "allowed_devices": input_manager.allowed_devices,
             "saved_presets": self.saved_presets,
@@ -5073,6 +5215,8 @@ class iRacingControlApp:
         self.auto_detect.set(data.get("auto_detect", True))
         self.auto_restart_on_rescan.set(data.get("auto_restart_on_rescan", True))
         self.auto_restart_on_race.set(data.get("auto_restart_on_race", True))
+        self.keep_trying_targets.set(data.get("keep_trying_targets", True))
+        self.clear_target_bind = data.get("clear_target_bind")
         self.pending_scan_on_start = data.get("pending_scan_on_start", False)
 
         input_manager.allowed_devices = data.get("allowed_devices", [])
@@ -5121,11 +5265,7 @@ class iRacingControlApp:
     # ------------------------------------------------------------------
     def _make_single_action(self, controller: GenericController, target: float):
         """Create an action that adjusts a single controller to a target."""
-        return lambda: threading.Thread(
-            target=controller.adjust_to_target,
-            args=(target,),
-            daemon=True
-        ).start()
+        return lambda: controller.request_target(target)
 
     def _make_combo_action(self, values: Dict[str, str]):
         """Create an action that adjusts multiple controllers at once."""
@@ -5142,11 +5282,7 @@ class iRacingControlApp:
                         continue
 
                     ctrl = self.controllers[var_name]
-                    threading.Thread(
-                        target=ctrl.adjust_to_target,
-                        args=(target,),
-                        daemon=True
-                    ).start()
+                    ctrl.request_target(target)
 
         return combo_action
 
@@ -5411,6 +5547,15 @@ class iRacingControlApp:
                     voice_phrases[phrase] = action
 
         self.voice_phrase_map = voice_phrases
+
+        if self.clear_target_bind:
+            action = self.clear_all_targets
+            if self.clear_target_bind.startswith("KEY:"):
+                key_name = self.clear_target_bind.split(":", 1)[1].lower()
+                handle = keyboard.add_hotkey(key_name, action)
+                self._hotkey_handles.append(handle)
+            else:
+                input_manager.listeners[self.clear_target_bind] = action
 
         input_manager.active = (self.app_state == "RUNNING")
         if self.app_state != "RUNNING":

@@ -4588,6 +4588,7 @@ class iRacingControlApp:
             self.auto_detect.get()
             or self.auto_restart_on_race.get()
             or self.auto_scan_on_change.get()
+            or self.auto_restart_on_rescan.get()
         ):
             self.root.after(2000, self.auto_preset_loop)
             return
@@ -4605,7 +4606,11 @@ class iRacingControlApp:
             if self._handle_session_change(session_type, session_num):
                 return
 
-            if not (self.auto_detect.get() or self.auto_scan_on_change.get()):
+            if not (
+                self.auto_detect.get()
+                or self.auto_scan_on_change.get()
+                or self.auto_restart_on_rescan.get()
+            ):
                 self.root.after(2000, self.auto_preset_loop)
                 return
 
@@ -4636,6 +4641,9 @@ class iRacingControlApp:
                 c for c in raw_track
                 if c.isalnum() or c in " -_"
             )
+            if not car_clean.strip() or not track_clean.strip():
+                self.root.after(2000, self.auto_preset_loop)
+                return
 
             current_pair = (car_clean, track_clean)
 
@@ -4646,7 +4654,7 @@ class iRacingControlApp:
 
                 if self.auto_detect.get():
                     self.auto_fill_ui(car_clean, track_clean)
-                if self.auto_scan_on_change.get():
+                if self.auto_scan_on_change.get() or self.auto_restart_on_rescan.get():
                     self._schedule_session_scan()
                 if telemetry_reconnected:
                     self._schedule_session_scan()

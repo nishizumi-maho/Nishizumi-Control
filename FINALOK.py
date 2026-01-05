@@ -3517,6 +3517,7 @@ class iRacingControlApp:
         self.scans_since_restart = 0
         self.pending_scan_on_start = False
         self.skip_race_restart_once = False
+        self.skip_session_scan_once = False
         self._last_auto_pair: Tuple[str, str] = ("", "")
         self._session_scan_pending = False
 
@@ -4666,6 +4667,10 @@ class iRacingControlApp:
                 self.skip_race_restart_once = False
                 return False
 
+            if self.skip_session_scan_once:
+                self.skip_session_scan_once = False
+                return False
+
             if self.auto_restart_on_race.get() and new_type == "Race":
                 self.pending_scan_on_start = True
                 mark_pending_scan()
@@ -5170,6 +5175,7 @@ class iRacingControlApp:
         """Execute a deferred scan request set before restarting."""
         if consume_pending_scan():
             self.pending_scan_on_start = True
+            self.skip_session_scan_once = True
 
         if self.pending_scan_on_start:
             self.skip_race_restart_once = True

@@ -115,6 +115,7 @@ class TkWidgetBase(QtCore.QObject):
         self._layout_kind = None
         self._children: List["TkWidgetBase"] = []
         self._bindings: Dict[str, List[Callable]] = {}
+        self._after_jobs: Dict[int, QtCore.QTimer] = {}
         self._event_filter = _TkEventFilter(self)
         if master is not None:
             master._register_child(self)
@@ -190,6 +191,24 @@ class TkWidgetBase(QtCore.QObject):
         app = QtWidgets.QApplication.instance()
         if app:
             app.processEvents()
+
+    def after(self, delay_ms, callback):
+        parent = self._widget
+        if parent is None and self.master is not None:
+            parent = self.master._widget
+        if parent is None:
+            parent = QtWidgets.QApplication.instance()
+        timer = QtCore.QTimer(parent)
+        timer.setSingleShot(True)
+        timer.timeout.connect(callback)
+        timer.start(delay_ms)
+        self._after_jobs[id(timer)] = timer
+        return id(timer)
+
+    def after_cancel(self, handle):
+        timer = self._after_jobs.pop(handle, None)
+        if timer:
+            timer.stop()
 
     def destroy(self):
         if self._widget is not None:

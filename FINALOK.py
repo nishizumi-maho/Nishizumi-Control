@@ -3599,8 +3599,8 @@ class iRacingControlApp:
         self.auto_restart_on_rescan = tk.BooleanVar(value=True)
         self.auto_restart_on_race = tk.BooleanVar(value=True)
         self.keep_trying_targets = tk.BooleanVar(value=True)
-        self.show_scan_popup = tk.BooleanVar(value=True)
-        self.auto_save_presets = tk.BooleanVar(value=False)
+        self.show_scan_popup = tk.BooleanVar(value=False)
+        self.auto_save_presets = tk.BooleanVar(value=True)
         self.clear_target_bind: Optional[str] = None
         self.btn_clear_target_bind: Optional[tk.Button] = None
         self.voice_phrase_map: Dict[str, Callable] = {}
@@ -5351,9 +5351,9 @@ class iRacingControlApp:
         self.auto_detect.set(data.get("auto_detect", True))
         self.auto_restart_on_rescan.set(data.get("auto_restart_on_rescan", True))
         self.auto_restart_on_race.set(data.get("auto_restart_on_race", True))
-        self.auto_save_presets.set(data.get("auto_save_presets", False))
+        self.auto_save_presets.set(data.get("auto_save_presets", True))
         self.keep_trying_targets.set(data.get("keep_trying_targets", True))
-        self.show_scan_popup.set(data.get("show_scan_popup", True))
+        self.show_scan_popup.set(data.get("show_scan_popup", False))
         self.clear_target_bind = data.get("clear_target_bind")
         self.pending_scan_on_start = data.get("pending_scan_on_start", False)
 

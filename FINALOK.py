@@ -4777,6 +4777,7 @@ class iRacingControlApp:
             self._mark_session_inactive()
             return False
 
+        self._last_auto_pair = ("", "")
         self.auto_load_attempted.clear()
         return True
 

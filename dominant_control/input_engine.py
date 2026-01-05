@@ -6,7 +6,7 @@ import random
 import time
 from typing import Any, Dict, Optional, Tuple
 
-from .config import DEFAULT_TIMING_PROFILES, GLOBAL_TIMING
+from .config import GLOBAL_TIMING
 
 IS_WINDOWS = os.name == "nt" and hasattr(ctypes, "windll")
 
@@ -112,76 +112,21 @@ def _normalize_timing_config(timing: Dict[str, Any]) -> Dict[str, Any]:
     if normalized.get("profile") not in allowed_profiles:
         normalized["profile"] = "aggressive"
 
-    profile_settings: Dict[str, Dict[str, Any]] = {}
-    raw_profiles = normalized.get("profile_settings", {})
-    legacy_custom = {
-        "press_min_ms": normalized.get("press_min_ms"),
-        "press_max_ms": normalized.get("press_max_ms"),
-        "interval_min_ms": normalized.get("interval_min_ms"),
-        "interval_max_ms": normalized.get("interval_max_ms"),
-        "random_enabled": normalized.get("random_enabled"),
-        "random_range_ms": normalized.get("random_range_ms"),
-    }
-    legacy_has_values = any(value is not None for value in legacy_custom.values())
+    for key in [
+        "press_min_ms",
+        "press_max_ms",
+        "interval_min_ms",
+        "interval_max_ms",
+        "random_range_ms",
+    ]:
+        try:
+            normalized[key] = max(1, int(normalized.get(key, GLOBAL_TIMING[key])))
+        except (TypeError, ValueError, KeyError):
+            normalized[key] = GLOBAL_TIMING.get(key, 10)
 
-    for profile, defaults in DEFAULT_TIMING_PROFILES.items():
-        merged = dict(defaults)
-        raw_profile = {}
-        if isinstance(raw_profiles, dict):
-            raw_profile = raw_profiles.get(profile, {}) or {}
-        if not isinstance(raw_profile, dict):
-            raw_profile = {}
-        merged.update(raw_profile)
-        if profile == "custom" and legacy_has_values:
-            for key, value in legacy_custom.items():
-                if value is not None:
-                    merged[key] = value
-
-        for key in [
-            "press_min_ms",
-            "press_max_ms",
-            "interval_min_ms",
-            "interval_max_ms",
-            "random_range_ms",
-        ]:
-            try:
-                merged[key] = max(1, int(merged.get(key, defaults[key])))
-            except (TypeError, ValueError, KeyError):
-                merged[key] = defaults.get(key, 10)
-
-        merged["random_enabled"] = bool(
-            merged.get("random_enabled", defaults.get("random_enabled", False))
-        )
-        profile_settings[profile] = merged
-
-    raw_customized = normalized.get("profile_customized", {})
-    profile_customized: Dict[str, bool] = {}
-    for profile in DEFAULT_TIMING_PROFILES:
-        default_customized = profile == "custom" and legacy_has_values
-        if isinstance(raw_customized, dict):
-            profile_customized[profile] = bool(
-                raw_customized.get(profile, default_customized)
-            )
-        else:
-            profile_customized[profile] = default_customized
-
-    normalized["profile_settings"] = profile_settings
-    normalized["profile_customized"] = profile_customized
+    normalized["random_enabled"] = bool(normalized.get("random_enabled", False))
 
     return normalized
-
-
-def _effective_profile_settings(
-    timing_cfg: Dict[str, Any], profile: str
-) -> Dict[str, Any]:
-    """Return the timing settings for the active profile."""
-
-    profile_settings = timing_cfg.get("profile_settings", {})
-    profile_customized = timing_cfg.get("profile_customized", {})
-    if profile_customized.get(profile, False):
-        return profile_settings.get(profile, DEFAULT_TIMING_PROFILES[profile])
-
-    return DEFAULT_TIMING_PROFILES[profile]
 
 
 def _compute_timing(is_float: bool = False) -> Tuple[float, float]:
@@ -190,18 +135,30 @@ def _compute_timing(is_float: bool = False) -> Tuple[float, float]:
     timing_cfg = _normalize_timing_config(GLOBAL_TIMING)
     profile = timing_cfg.get("profile", "aggressive")
 
-    settings = _effective_profile_settings(timing_cfg, profile)
-    p_min = settings.get("press_min_ms", 60)
-    p_max = settings.get("press_max_ms", 80)
-    i_min = settings.get("interval_min_ms", 60)
-    i_max = settings.get("interval_max_ms", 90)
-    press_ms = random.uniform(p_min, p_max)
-    interval_ms = random.uniform(i_min, i_max)
+    if profile == "aggressive":
+        press_ms = 10
+        interval_ms = 10
+    elif profile == "casual":
+        press_ms = 80
+        interval_ms = 100
+    elif profile == "relaxed":
+        press_ms = 150
+        interval_ms = 200
+    elif profile == "bot":
+        press_ms = 1
+        interval_ms = 1
+    else:  # custom
+        p_min = timing_cfg.get("press_min_ms", 60)
+        p_max = timing_cfg.get("press_max_ms", 80)
+        i_min = timing_cfg.get("interval_min_ms", 60)
+        i_max = timing_cfg.get("interval_max_ms", 90)
+        press_ms = random.uniform(p_min, p_max)
+        interval_ms = random.uniform(i_min, i_max)
 
-    if settings.get("random_enabled", False):
-        rng = settings.get("random_range_ms", 10)
-        press_ms += random.uniform(-rng, rng)
-        interval_ms += random.uniform(-rng, rng)
+        if timing_cfg.get("random_enabled", False):
+            rng = timing_cfg.get("random_range_ms", 10)
+            press_ms += random.uniform(-rng, rng)
+            interval_ms += random.uniform(-rng, rng)
 
     min_value = 1 if profile == "bot" else 10
     press_ms = max(min_value, press_ms)

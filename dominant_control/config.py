@@ -28,59 +28,15 @@ DEFAULT_OVERLAY_FEEDBACK: Dict[str, Any] = {
     "cooldown_s": 6.0,
 }
 
-DEFAULT_TIMING_PROFILES: Dict[str, Dict[str, Any]] = {
-    "aggressive": {
-        "press_min_ms": 10,
-        "press_max_ms": 10,
-        "interval_min_ms": 10,
-        "interval_max_ms": 10,
-        "random_enabled": False,
-        "random_range_ms": 10,
-    },
-    "casual": {
-        "press_min_ms": 80,
-        "press_max_ms": 80,
-        "interval_min_ms": 100,
-        "interval_max_ms": 100,
-        "random_enabled": False,
-        "random_range_ms": 10,
-    },
-    "relaxed": {
-        "press_min_ms": 150,
-        "press_max_ms": 150,
-        "interval_min_ms": 200,
-        "interval_max_ms": 200,
-        "random_enabled": False,
-        "random_range_ms": 10,
-    },
-    "bot": {
-        "press_min_ms": 20,
-        "press_max_ms": 20,
-        "interval_min_ms": 20,
-        "interval_max_ms": 20,
-        "random_enabled": False,
-        "random_range_ms": 10,
-    },
-    "custom": {
-        "press_min_ms": 60,
-        "press_max_ms": 80,
-        "interval_min_ms": 60,
-        "interval_max_ms": 90,
-        "random_enabled": False,
-        "random_range_ms": 10,
-    },
-}
-
 GLOBAL_TIMING: Dict[str, Any] = {
     "profile": "aggressive",  # "aggressive", "casual", "relaxed", "custom", "bot"
-    "profile_customized": {
-        profile: profile == "custom"
-        for profile in DEFAULT_TIMING_PROFILES
-    },
-    "profile_settings": {
-        profile: settings.copy()
-        for profile, settings in DEFAULT_TIMING_PROFILES.items()
-    },
+    # Custom profile settings:
+    "press_min_ms": 60,
+    "press_max_ms": 80,
+    "interval_min_ms": 60,
+    "interval_max_ms": 90,
+    "random_enabled": False,
+    "random_range_ms": 10,
 }
 
 TTS_STATE: Dict[str, Any] = {
@@ -202,7 +158,6 @@ __all__ = [
     "BASE_PATH",
     "CONFIG_FILE",
     "CONFIG_FOLDER",
-    "DEFAULT_TIMING_PROFILES",
     "DEFAULT_OVERLAY_FEEDBACK",
     "GLOBAL_TIMING",
     "ICON_CANDIDATES",

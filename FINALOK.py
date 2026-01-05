@@ -492,7 +492,7 @@ def _compute_timing(is_float: bool = False) -> Tuple[float, float]:
     profile = timing_cfg.get("profile", "aggressive")
 
     if profile == "aggressive":
-        press_ms = 10
+        press_ms = 25
         interval_ms = 10
     elif profile == "casual":
         press_ms = 80
@@ -501,8 +501,8 @@ def _compute_timing(is_float: bool = False) -> Tuple[float, float]:
         press_ms = 150
         interval_ms = 200
     elif profile == "bot":
-        press_ms = 1
-        interval_ms = 1
+        press_ms = 20
+        interval_ms = 10
     else:  # custom
         p_min = timing_cfg.get("press_min_ms", 60)
         p_max = timing_cfg.get("press_max_ms", 80)
@@ -3259,6 +3259,7 @@ class GlobalTimingWindow(tk.Toplevel):
         self.title("Timing Adjustments (Anti-Detection)")
         self.geometry("420x420")
         self.callback = callback_save
+        self._profile_initialized = False
 
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True, padx=10, pady=10)
@@ -3392,6 +3393,7 @@ class GlobalTimingWindow(tk.Toplevel):
         ).pack(fill="x", padx=10, pady=10)
 
         self._on_profile_change()
+        self._profile_initialized = True
 
     def _on_profile_change(self):
         """Handle profile selection change."""
@@ -3407,6 +3409,10 @@ class GlobalTimingWindow(tk.Toplevel):
             self.entry_random_range
         ]:
             widget.config(state=state)
+
+        if self._profile_initialized and profile != "custom":
+            GLOBAL_TIMING["profile"] = profile
+            self.callback(GLOBAL_TIMING)
 
     def _toggle_random(self):
         """Handle randomization toggle."""

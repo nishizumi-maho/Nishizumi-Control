@@ -892,6 +892,7 @@ class _TtkNamespace:
 tk = _TkNamespace()
 tk.Tk = Tk
 tk.Toplevel = Toplevel
+tk.Widget = TkWidgetBase
 tk.Frame = Frame
 tk.LabelFrame = LabelFrame
 tk.Label = Label

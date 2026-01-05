@@ -882,7 +882,7 @@ class _FileDialog:
 
 
 class _TkNamespace:
-    pass
+    Widget = TkWidgetBase
 
 
 class _TtkNamespace:

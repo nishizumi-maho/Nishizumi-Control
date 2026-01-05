@@ -2729,6 +2729,17 @@ class ControlTab(tk.Frame):
         if self.app:
             self.app.ui(self.lbl_status.config, text=text, fg=color)
 
+    def _bind_autosave_entry(self, entry: tk.Entry) -> None:
+        """Attach auto-save handlers to entries."""
+        entry.bind(
+            "<KeyRelease>",
+            lambda _event: self.app.schedule_preset_save()
+        )
+        entry.bind(
+            "<FocusOut>",
+            lambda _event: self.app.schedule_preset_save()
+        )
+
     def run_bot_timing_probe(self):
         """Run a fast timing probe to suggest a stable BOT delay."""
 
@@ -2807,7 +2818,7 @@ class ControlTab(tk.Frame):
         else:
             btn.config(text=original_text, bg="#f0f0f0")
 
-        self.app.schedule_save()
+        self.app.schedule_preset_save()
 
     def _config_bind_button(self, button: tk.Button, data_store: Dict[str, Any]):
         """Configure binding button behavior."""
@@ -2831,7 +2842,7 @@ class ControlTab(tk.Frame):
                 data_store["bind"] = None
                 button.config(text="Set Bind", bg="#f0f0f0")
 
-            self.app.schedule_save()
+            self.app.schedule_preset_save()
 
         button.config(command=on_click)
 
@@ -2855,6 +2866,7 @@ class ControlTab(tk.Frame):
 
         value_entry = ttk.Entry(frame, width=8)
         value_entry.pack(side="left", padx=5)
+        self._bind_autosave_entry(value_entry)
 
         if self.app.app_state != "CONFIG":
             value_entry.config(state="readonly")
@@ -2865,6 +2877,7 @@ class ControlTab(tk.Frame):
         voice_entry = ttk.Entry(frame, width=18)
         voice_entry.pack(side="left", padx=5)
         voice_entry.insert(0, "")
+        self._bind_autosave_entry(voice_entry)
         if self.app.app_state != "CONFIG":
             voice_entry.config(state="readonly")
 
@@ -3091,6 +3104,17 @@ class ComboTab(tk.Frame):
                 except Exception:
                     pass
 
+    def _bind_autosave_entry(self, entry: tk.Entry) -> None:
+        """Attach auto-save handlers to entries."""
+        entry.bind(
+            "<KeyRelease>",
+            lambda _event: self.app.schedule_preset_save()
+        )
+        entry.bind(
+            "<FocusOut>",
+            lambda _event: self.app.schedule_preset_save()
+        )
+
     def _config_bind_button(self, button: tk.Button, data_store: Dict[str, Any]):
         """Configure binding button behavior."""
         def on_click():
@@ -3113,7 +3137,7 @@ class ComboTab(tk.Frame):
                 data_store["bind"] = None
                 button.config(text="Set Bind", bg="#f0f0f0")
 
-            self.app.schedule_save()
+            self.app.schedule_preset_save()
 
         button.config(command=on_click)
 
@@ -3150,6 +3174,7 @@ class ComboTab(tk.Frame):
             if self.app.app_state != "CONFIG":
                 entry.config(state="readonly")
             row_data["entries"][var_name] = entry
+            self._bind_autosave_entry(entry)
 
         # Delete button (except for RESET)
         if not is_reset:
@@ -3186,6 +3211,7 @@ class ComboTab(tk.Frame):
         if self.app.app_state != "CONFIG":
             voice_entry.config(state="readonly")
         row_data["voice_entry"] = voice_entry
+        self._bind_autosave_entry(voice_entry)
 
         self.preset_rows.append(row_data)
 
@@ -3197,7 +3223,7 @@ class ComboTab(tk.Frame):
         row_data["frame"].destroy()
         if row_data in self.preset_rows:
             self.preset_rows.remove(row_data)
-        self.app.schedule_save()
+        self.app.schedule_preset_save()
 
     def get_config(self) -> Dict[str, Any]:
         """Get current combo configuration."""
@@ -3574,10 +3600,12 @@ class iRacingControlApp:
         self.auto_restart_on_race = tk.BooleanVar(value=True)
         self.keep_trying_targets = tk.BooleanVar(value=True)
         self.show_scan_popup = tk.BooleanVar(value=True)
+        self.auto_save_presets = tk.BooleanVar(value=False)
         self.clear_target_bind: Optional[str] = None
         self.btn_clear_target_bind: Optional[tk.Button] = None
         self.voice_phrase_map: Dict[str, Callable] = {}
         self._voice_traces_attached = False
+        self._auto_save_job: Optional[str] = None
 
         # Load configuration
         self.load_config()
@@ -3874,6 +3902,13 @@ class iRacingControlApp:
             command=self.action_delete_preset,
             bg="#ffcccc"
         ).pack(side="left", expand=True, fill="x", padx=2)
+
+        tk.Checkbutton(
+            presets_frame,
+            text="Auto-save preset edits (hotkeys/macros)",
+            variable=self.auto_save_presets,
+            command=self.schedule_save
+        ).pack(anchor="w", padx=5, pady=(0, 5))
 
         # Device management
         devices_frame = tk.LabelFrame(
@@ -4408,9 +4443,18 @@ class iRacingControlApp:
         if not car or not track:
             messagebox.showwarning("Error", "Define Car and Track.")
             return
+        self._save_preset_for_pair(car, track, show_message=True)
 
+    def _save_preset_for_pair(
+        self,
+        car: str,
+        track: str,
+        show_message: bool = False
+    ) -> None:
+        """Save preset data for a specific car/track pair."""
         # Collect overlay config
-        self.overlay_tab.collect_for_car(car)
+        if self.overlay_tab:
+            self.overlay_tab.collect_for_car(car)
 
         if car not in self.car_overlay_feedback:
             self.car_overlay_feedback[car] = DEFAULT_OVERLAY_FEEDBACK.copy()
@@ -4444,7 +4488,8 @@ class iRacingControlApp:
         if (car, track) == (self.current_car, self.current_track):
             self.register_current_listeners()
         self.update_preset_ui()
-        messagebox.showinfo("Saved", f"Preset saved for {car} @ {track}")
+        if show_message:
+            messagebox.showinfo("Saved", f"Preset saved for {car} @ {track}")
 
     def load_specific_preset(self, car: str, track: str):
         """Load a specific car/track preset."""
@@ -4552,6 +4597,7 @@ class iRacingControlApp:
 
             driver_info = self.ir["DriverInfo"]
             if not driver_info:
+                self._mark_session_inactive()
                 self.root.after(2000, self.auto_preset_loop)
                 return
 
@@ -4560,6 +4606,7 @@ class iRacingControlApp:
 
             weekend = self.ir["WeekendInfo"]
             if not weekend:
+                self._mark_session_inactive()
                 self.root.after(2000, self.auto_preset_loop)
                 return
 
@@ -4583,6 +4630,7 @@ class iRacingControlApp:
                 print(f"[AutoDetect] {car_clean} @ {track_clean}")
 
                 self.auto_fill_ui(car_clean, track_clean)
+                self._schedule_session_scan()
 
                 # Create skeleton if doesn't exist
                 if car_clean not in self.saved_presets:
@@ -4657,6 +4705,7 @@ class iRacingControlApp:
         new_num = session_num
 
         if not new_type and new_num is None:
+            self._mark_session_inactive()
             return False
 
         session_changed = (
@@ -4687,6 +4736,13 @@ class iRacingControlApp:
             self._schedule_session_scan()
 
         return False
+
+    def _mark_session_inactive(self) -> None:
+        """Reset session tracking when not connected to a session."""
+        self.last_session_type = ""
+        self.last_session_num = None
+        self._last_auto_pair = ("", "")
+        self._session_scan_pending = False
 
     def _schedule_session_scan(self) -> None:
         """Schedule a rescan and preset reload for a session change."""
@@ -5193,6 +5249,28 @@ class iRacingControlApp:
         """Schedule configuration save."""
         self.ui(self.save_config)
 
+    def schedule_preset_save(self) -> None:
+        """Auto-save current preset if the setting is enabled."""
+        if not self.auto_save_presets.get():
+            return
+        if self.app_state != "CONFIG":
+            return
+        if self._auto_save_job:
+            self.root.after_cancel(self._auto_save_job)
+        self._auto_save_job = self.root.after(
+            400,
+            self._auto_save_current_preset
+        )
+
+    def _auto_save_current_preset(self) -> None:
+        """Persist the current preset without showing prompts."""
+        self._auto_save_job = None
+        car = self.combo_car.get().strip()
+        track = self.combo_track.get().strip()
+        if not car or not track:
+            return
+        self._save_preset_for_pair(car, track, show_message=False)
+
     def save_config(self):
         """Save configuration to disk."""
         # Collect overlay config
@@ -5217,6 +5295,7 @@ class iRacingControlApp:
             "auto_detect": self.auto_detect.get(),
             "auto_restart_on_rescan": self.auto_restart_on_rescan.get(),
             "auto_restart_on_race": self.auto_restart_on_race.get(),
+            "auto_save_presets": self.auto_save_presets.get(),
             "keep_trying_targets": self.keep_trying_targets.get(),
             "show_scan_popup": self.show_scan_popup.get(),
             "clear_target_bind": self.clear_target_bind,
@@ -5272,6 +5351,7 @@ class iRacingControlApp:
         self.auto_detect.set(data.get("auto_detect", True))
         self.auto_restart_on_rescan.set(data.get("auto_restart_on_rescan", True))
         self.auto_restart_on_race.set(data.get("auto_restart_on_race", True))
+        self.auto_save_presets.set(data.get("auto_save_presets", False))
         self.keep_trying_targets.set(data.get("keep_trying_targets", True))
         self.show_scan_popup.set(data.get("show_scan_popup", True))
         self.clear_target_bind = data.get("clear_target_bind")

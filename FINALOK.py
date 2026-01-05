@@ -3513,10 +3513,12 @@ class iRacingControlApp:
         self.current_car = ""
         self.current_track = ""
         self.last_session_type = ""
+        self.last_session_num: Optional[int] = None
         self.scans_since_restart = 0
         self.pending_scan_on_start = False
         self.skip_race_restart_once = False
         self._last_auto_pair: Tuple[str, str] = ("", "")
+        self._session_scan_pending = False
 
         # Auto-load tracking
         self.auto_load_attempted: set = set()
@@ -3564,6 +3566,7 @@ class iRacingControlApp:
         self.auto_restart_on_rescan = tk.BooleanVar(value=True)
         self.auto_restart_on_race = tk.BooleanVar(value=True)
         self.keep_trying_targets = tk.BooleanVar(value=True)
+        self.show_scan_popup = tk.BooleanVar(value=True)
         self.clear_target_bind: Optional[str] = None
         self.btn_clear_target_bind: Optional[tk.Button] = None
         self.voice_phrase_map: Dict[str, Callable] = {}
@@ -3791,6 +3794,13 @@ class iRacingControlApp:
             stability_frame,
             text="Auto-restart and scan when joining a Race session",
             variable=self.auto_restart_on_race,
+            command=self.schedule_save
+        ).pack(anchor="w", pady=2)
+
+        tk.Checkbutton(
+            stability_frame,
+            text="Show scan completion popup",
+            variable=self.show_scan_popup,
             command=self.schedule_save
         ).pack(anchor="w", pady=2)
 
@@ -4525,8 +4535,8 @@ class iRacingControlApp:
                 self.root.after(2000, self.auto_preset_loop)
                 return
 
-            session_type = self._get_session_type()
-            if self._handle_session_change(session_type):
+            session_type, session_num = self._get_session_state()
+            if self._handle_session_change(session_type, session_num):
                 return
 
             if not self.auto_detect.get():
@@ -4603,12 +4613,12 @@ class iRacingControlApp:
 
         self.root.after(2000, self.auto_preset_loop)
 
-    def _get_session_type(self) -> str:
-        """Return the current session type if available."""
+    def _get_session_state(self) -> Tuple[str, Optional[int]]:
+        """Return the current session type and session number if available."""
         try:
             session_info = self.ir["SessionInfo"]
         except Exception:
-            return ""
+            return "", None
 
         session_num = None
         try:
@@ -4616,29 +4626,41 @@ class iRacingControlApp:
         except Exception:
             pass
 
+        session_type = ""
         try:
             sessions = session_info.get("Sessions") if session_info else None
             if isinstance(sessions, list):
                 if session_num is not None and 0 <= session_num < len(sessions):
                     session_type = sessions[session_num].get("SessionType", "")
-                    if session_type:
-                        return session_type
-
-                for entry in sessions:
-                    session_type = entry.get("SessionType", "")
-                    if session_type:
-                        return session_type
+                if not session_type:
+                    for entry in sessions:
+                        session_type = entry.get("SessionType", "")
+                        if session_type:
+                            break
         except Exception:
             pass
 
-        return ""
+        return session_type, session_num
 
-    def _handle_session_change(self, session_type: str) -> bool:
+    def _handle_session_change(
+        self, session_type: str, session_num: Optional[int]
+    ) -> bool:
         """Handle session transitions and restart if entering a race."""
         new_type = session_type or ""
+        new_num = session_num
 
-        if new_type != self.last_session_type:
+        if not new_type and new_num is None:
+            return False
+
+        session_changed = (
+            new_type != self.last_session_type
+            or (new_num is not None and new_num != self.last_session_num)
+        )
+
+        if session_changed:
             self.last_session_type = new_type
+            if new_num is not None:
+                self.last_session_num = new_num
 
             if self.skip_race_restart_once and new_type == "Race":
                 self.skip_race_restart_once = False
@@ -4651,7 +4673,28 @@ class iRacingControlApp:
                 restart_program()
                 return True
 
+            self._schedule_session_scan()
+
         return False
+
+    def _schedule_session_scan(self) -> None:
+        """Schedule a rescan and preset reload for a session change."""
+        if self._session_scan_pending:
+            return
+
+        self._session_scan_pending = True
+        self.root.after(200, self._auto_scan_and_load_preset)
+
+    def _auto_scan_and_load_preset(self) -> None:
+        """Scan controls and then reload the current car/track preset."""
+        self._session_scan_pending = False
+        self.scan_driver_controls()
+
+        car = (self.combo_car.get().strip() or self.current_car).strip()
+        track = (self.combo_track.get().strip() or self.current_track).strip()
+        if car and track and car in self.saved_presets:
+            if track in self.saved_presets[car]:
+                self.load_specific_preset(car, track)
 
     def scan_driver_controls(self):
         """Scan for dc* driver control variables in current car."""
@@ -4830,10 +4873,11 @@ class iRacingControlApp:
 
         self.scans_since_restart += 1
 
-        messagebox.showinfo(
-            "Scan",
-            f"{len(clean_vars)} 'dc' controls configured for this car."
-        )
+        if self.show_scan_popup.get():
+            messagebox.showinfo(
+                "Scan",
+                f"{len(clean_vars)} 'dc' controls configured for this car."
+            )
 
     def rebuild_tabs(self, vars_list: List[Tuple[str, bool]]):
         """Rebuild control tabs with new variable list."""
@@ -5162,6 +5206,7 @@ class iRacingControlApp:
             "auto_restart_on_rescan": self.auto_restart_on_rescan.get(),
             "auto_restart_on_race": self.auto_restart_on_race.get(),
             "keep_trying_targets": self.keep_trying_targets.get(),
+            "show_scan_popup": self.show_scan_popup.get(),
             "clear_target_bind": self.clear_target_bind,
             "pending_scan_on_start": self.pending_scan_on_start,
             "allowed_devices": input_manager.allowed_devices,
@@ -5216,6 +5261,7 @@ class iRacingControlApp:
         self.auto_restart_on_rescan.set(data.get("auto_restart_on_rescan", True))
         self.auto_restart_on_race.set(data.get("auto_restart_on_race", True))
         self.keep_trying_targets.set(data.get("keep_trying_targets", True))
+        self.show_scan_popup.set(data.get("show_scan_popup", True))
         self.clear_target_bind = data.get("clear_target_bind")
         self.pending_scan_on_start = data.get("pending_scan_on_start", False)
 

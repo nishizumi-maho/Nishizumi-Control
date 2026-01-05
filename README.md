@@ -9,12 +9,16 @@ An accessibility-focused control manager for iRacing that provides:
 - Per-car and per-track preset management
 - Macro/combo system for quick adjustments
 
-![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)
+![Version](https://img.shields.io/badge/version-4.0.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 ## Overview
 Dominant Control is a single-file application (`FINALOK.py`) that manages iRacing’s driver-adjustable controls. It includes optional text-to-speech feedback, joystick support, and offline voice control when the related dependencies are installed.
+
+## Release 4.0.0 Highlights
+- **Start with Windows:** new toggle to add/remove a startup entry so the app can launch automatically on login.
+- **Rescan workflow:** optional restart-before-rescan setting to improve control detection after the first scan and keep presets in sync.
 
 ## Supported Platforms & Requirements
 - **OS:** Windows 10/11 (64-bit)
@@ -42,6 +46,10 @@ See [`requirements.txt`](requirements.txt) for the full Python dependency list.
 - **Text-to-speech:** Requires `pyttsx3`.
 - **Audio device selection:** Requires `pyaudio`.
 - **Voice commands:** Requires `speech_recognition` and `vosk` (plus a downloaded Vosk model).
+
+## Known Issues
+1. Sometimes when changing sessions with a different car or track, the app may not update the car and track profile. Scan controls again to fix it. This is expected to work fine when changing from practice to qualifying in the same session.
+2. Some cars should show float values (e.g., brake bias) inside the app, but they show integer numbers only even if the car allows float values in adjustments. This is suspected to be a telemetry issue from iRacing and is being investigated.
 
 ## License & Attribution
 - Licensed under the **MIT License** (see [`license.md`](license.md)).

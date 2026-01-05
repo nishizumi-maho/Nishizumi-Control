@@ -1,5 +1,7 @@
 # Dominant Control for iRacing
 <img width="256" height="256" alt="dominant_control (1)-5" src="https://github.com/user-attachments/assets/994813f4-dff8-4789-8ba9-3b886bb1e794" />
+
+
 An accessibility-focused control manager for iRacing that provides:
 - Dynamic driver control adjustment (brake bias, traction control, etc.)
 - Multi-device input support (keyboard, joystick, wheel buttons)

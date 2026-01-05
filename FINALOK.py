@@ -4980,10 +4980,7 @@ class iRacingControlApp:
                 if not isinstance(value, numbers.Real):
                     continue
 
-                is_float = (
-                    isinstance(value, numbers.Real)
-                    and not isinstance(value, numbers.Integral)
-                )
+                is_float = (float(value) % 1.0) != 0.0
                 found_vars.append((candidate, is_float))
 
         except Exception as e:

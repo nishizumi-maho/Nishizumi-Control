@@ -3550,6 +3550,7 @@ class iRacingControlApp:
         self.pending_scan_on_start = False
         self.skip_race_restart_once = False
         self.skip_session_scan_once = False
+        self.skip_auto_scan_once = False
         self._last_auto_pair: Tuple[str, str] = ("", "")
         self._session_scan_pending = False
 
@@ -4749,6 +4750,10 @@ class iRacingControlApp:
         if self._session_scan_pending:
             return
 
+        if self.skip_auto_scan_once:
+            self.skip_auto_scan_once = False
+            return
+
         self._session_scan_pending = True
         self.root.after(200, self._auto_scan_and_load_preset)
 
@@ -4885,9 +4890,19 @@ class iRacingControlApp:
         self.rebuild_tabs(self.active_vars)
 
         # Update preset for current car/track
-        car = self.combo_car.get().strip() or self.current_car or "Generic Car"
-        track = self.combo_track.get().strip() or \
-                self.current_track or "Generic Track"
+        detected_car, detected_track = self._detect_current_car_track()
+        car = (
+            detected_car
+            or self.combo_car.get().strip()
+            or self.current_car
+            or "Generic Car"
+        )
+        track = (
+            detected_track
+            or self.combo_track.get().strip()
+            or self.current_track
+            or "Generic Track"
+        )
 
         self.current_car, self.current_track = car, track
         self.auto_fill_ui(car, track)
@@ -5238,12 +5253,52 @@ class iRacingControlApp:
         if consume_pending_scan():
             self.pending_scan_on_start = True
             self.skip_session_scan_once = True
+            self.skip_auto_scan_once = True
 
         if self.pending_scan_on_start:
             self.skip_race_restart_once = True
             self.pending_scan_on_start = False
             self.save_config()
             self.root.after(50, self.scan_driver_controls)
+
+    def _detect_current_car_track(self) -> Tuple[str, str]:
+        """Detect current car/track names from the iRacing SDK, if available."""
+        raw_car = ""
+        raw_track = ""
+
+        try:
+            driver_info = self.ir["DriverInfo"]
+            if driver_info:
+                idx = driver_info.get("DriverCarIdx")
+                if idx is not None:
+                    try:
+                        idx = int(idx)
+                    except (TypeError, ValueError):
+                        idx = None
+                if idx is not None:
+                    raw_car = driver_info["Drivers"][idx]["CarScreenName"]
+        except Exception:
+            pass
+
+        try:
+            weekend = self.ir["WeekendInfo"]
+            if weekend:
+                raw_track = weekend.get("TrackDisplayName", "")
+        except Exception:
+            pass
+
+        if not raw_car and not raw_track:
+            return "", ""
+
+        car_clean = "".join(
+            c for c in raw_car
+            if c.isalnum() or c in " -_"
+        ).strip()
+        track_clean = "".join(
+            c for c in raw_track
+            if c.isalnum() or c in " -_"
+        ).strip()
+        return car_clean, track_clean
 
     def schedule_save(self):
         """Schedule configuration save."""

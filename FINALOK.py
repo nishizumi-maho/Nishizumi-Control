@@ -3555,6 +3555,7 @@ class iRacingControlApp:
         self._session_scan_pending = False
         self._telemetry_active = False
         self._rescan_restart_pair: Tuple[str, str] = ("", "")
+        self._last_weekend_key: Optional[Tuple[Any, ...]] = None
 
         # Auto-load tracking
         self.auto_load_attempted: set = set()
@@ -4629,6 +4630,7 @@ class iRacingControlApp:
                 self._set_telemetry_active(False)
                 self.root.after(2000, self.auto_preset_loop)
                 return
+            self._handle_weekend_change(weekend)
 
             raw_track = weekend["TrackDisplayName"]
             telemetry_reconnected = self._set_telemetry_active(True)
@@ -4779,6 +4781,7 @@ class iRacingControlApp:
 
         self._last_auto_pair = ("", "")
         self.auto_load_attempted.clear()
+        self._last_weekend_key = None
         return True
 
     def _mark_session_inactive(self) -> None:
@@ -4789,6 +4792,36 @@ class iRacingControlApp:
         self._session_scan_pending = False
         self.auto_load_attempted.clear()
         self._telemetry_active = False
+        self._last_weekend_key = None
+
+    def _get_weekend_key(self, weekend: Dict[str, Any]) -> Optional[Tuple[Any, ...]]:
+        """Return a stable identifier for the current weekend/session."""
+        if not weekend:
+            return None
+
+        key_fields = (
+            weekend.get("SessionID"),
+            weekend.get("SubSessionID"),
+            weekend.get("TrackID"),
+            weekend.get("TrackDisplayName"),
+        )
+
+        if all(field in (None, "") for field in key_fields):
+            return None
+
+        return key_fields
+
+    def _handle_weekend_change(self, weekend: Dict[str, Any]) -> None:
+        """Reset auto-detect state when a new weekend/session loads."""
+        weekend_key = self._get_weekend_key(weekend)
+        if weekend_key is None or weekend_key == self._last_weekend_key:
+            return
+
+        self._last_weekend_key = weekend_key
+        self._last_auto_pair = ("", "")
+        self.auto_load_attempted.clear()
+        if self.auto_scan_on_change.get() or self.auto_restart_on_rescan.get():
+            self._schedule_session_scan()
 
     def _schedule_session_scan(self) -> None:
         """Schedule a rescan and preset reload for a session change."""

@@ -3597,6 +3597,7 @@ class iRacingControlApp:
             value=VOICE_TUNING_DEFAULTS["dynamic_energy"]
         )
         self.auto_detect = tk.BooleanVar(value=True)
+        self.auto_scan_on_change = tk.BooleanVar(value=True)
         self.auto_restart_on_rescan = tk.BooleanVar(value=True)
         self.auto_restart_on_race = tk.BooleanVar(value=True)
         self.keep_trying_targets = tk.BooleanVar(value=True)
@@ -3811,6 +3812,13 @@ class iRacingControlApp:
             auto_frame,
             text="Auto-detect Car/Track via iRacing",
             variable=self.auto_detect
+        ).pack(anchor="w")
+
+        tk.Checkbutton(
+            auto_frame,
+            text="Auto-scan when car/track changes",
+            variable=self.auto_scan_on_change,
+            command=self.schedule_save
         ).pack(anchor="w")
 
         stability_frame = tk.LabelFrame(
@@ -4575,7 +4583,11 @@ class iRacingControlApp:
 
     def auto_preset_loop(self):
         """Background loop for auto-detecting car/track."""
-        if not (self.auto_detect.get() or self.auto_restart_on_race.get()):
+        if not (
+            self.auto_detect.get()
+            or self.auto_restart_on_race.get()
+            or self.auto_scan_on_change.get()
+        ):
             self.root.after(2000, self.auto_preset_loop)
             return
 
@@ -4592,7 +4604,7 @@ class iRacingControlApp:
             if self._handle_session_change(session_type, session_num):
                 return
 
-            if not self.auto_detect.get():
+            if not (self.auto_detect.get() or self.auto_scan_on_change.get()):
                 self.root.after(2000, self.auto_preset_loop)
                 return
 
@@ -4630,8 +4642,10 @@ class iRacingControlApp:
                 self.current_car, self.current_track = car_clean, track_clean
                 print(f"[AutoDetect] {car_clean} @ {track_clean}")
 
-                self.auto_fill_ui(car_clean, track_clean)
-                self._schedule_session_scan()
+                if self.auto_detect.get():
+                    self.auto_fill_ui(car_clean, track_clean)
+                if self.auto_scan_on_change.get():
+                    self._schedule_session_scan()
 
                 # Create skeleton if doesn't exist
                 if car_clean not in self.saved_presets:
@@ -5348,6 +5362,7 @@ class iRacingControlApp:
             "microphone_device": self.microphone_device.get(),
             "audio_output_device": self.audio_output_device.get(),
             "auto_detect": self.auto_detect.get(),
+            "auto_scan_on_change": self.auto_scan_on_change.get(),
             "auto_restart_on_rescan": self.auto_restart_on_rescan.get(),
             "auto_restart_on_race": self.auto_restart_on_race.get(),
             "auto_save_presets": self.auto_save_presets.get(),
@@ -5404,6 +5419,7 @@ class iRacingControlApp:
             data.get("voice_tuning", VOICE_TUNING_DEFAULTS)
         )
         self.auto_detect.set(data.get("auto_detect", True))
+        self.auto_scan_on_change.set(data.get("auto_scan_on_change", True))
         self.auto_restart_on_rescan.set(data.get("auto_restart_on_rescan", True))
         self.auto_restart_on_race.set(data.get("auto_restart_on_race", True))
         self.auto_save_presets.set(data.get("auto_save_presets", True))

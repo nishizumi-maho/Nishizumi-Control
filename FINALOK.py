@@ -4600,8 +4600,19 @@ class iRacingControlApp:
             with self.ir_lock:
                 if not getattr(self.ir, "is_initialized", False):
                     self.ir.startup()
+                elif getattr(self.ir, "is_connected", True) is False:
+                    try:
+                        self.ir.shutdown()
+                    except Exception:
+                        pass
+                    self.ir.startup()
+                    self._refresh_controller_ir()
 
             if not getattr(self.ir, "is_initialized", False):
+                self.root.after(2000, self.auto_preset_loop)
+                return
+            if getattr(self.ir, "is_connected", True) is False:
+                self._set_telemetry_active(False)
                 self.root.after(2000, self.auto_preset_loop)
                 return
 

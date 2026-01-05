@@ -3554,6 +3554,7 @@ class iRacingControlApp:
         self._last_auto_pair: Tuple[str, str] = ("", "")
         self._session_scan_pending = False
         self._telemetry_active = False
+        self._rescan_restart_pair: Tuple[str, str] = ("", "")
 
         # Auto-load tracking
         self.auto_load_attempted: set = set()
@@ -4814,11 +4815,30 @@ class iRacingControlApp:
     def scan_driver_controls(self):
         """Scan for dc* driver control variables in current car."""
         if self.auto_restart_on_rescan.get() and self.scans_since_restart >= 1:
-            self.pending_scan_on_start = True
-            mark_pending_scan()
-            self.save_config()
-            restart_program()
-            return
+            detected_car, detected_track = self._detect_current_car_track()
+            restart_car = (
+                detected_car
+                or self.combo_car.get().strip()
+                or self.current_car
+            ).strip()
+            restart_track = (
+                detected_track
+                or self.combo_track.get().strip()
+                or self.current_track
+            ).strip()
+            restart_pair = (restart_car, restart_track)
+            if not (
+                restart_car
+                and restart_track
+                and restart_pair == self._rescan_restart_pair
+            ):
+                self.pending_scan_on_start = True
+                if restart_car and restart_track:
+                    self._rescan_restart_pair = restart_pair
+                mark_pending_scan()
+                self.save_config()
+                restart_program()
+                return
 
         # Preserve any inline (unsaved) bindings so rescans in the same
         # car/track session don't drop macros/hotkeys
@@ -5399,6 +5419,7 @@ class iRacingControlApp:
             "show_scan_popup": self.show_scan_popup.get(),
             "clear_target_bind": self.clear_target_bind,
             "pending_scan_on_start": self.pending_scan_on_start,
+            "rescan_restart_pair": list(self._rescan_restart_pair),
             "allowed_devices": input_manager.allowed_devices,
             "saved_presets": self.saved_presets,
             "car_overlay_config": self.car_overlay_config,
@@ -5456,6 +5477,9 @@ class iRacingControlApp:
         self.show_scan_popup.set(data.get("show_scan_popup", False))
         self.clear_target_bind = data.get("clear_target_bind")
         self.pending_scan_on_start = data.get("pending_scan_on_start", False)
+        pair = data.get("rescan_restart_pair", ["", ""])
+        if isinstance(pair, (list, tuple)) and len(pair) == 2:
+            self._rescan_restart_pair = (pair[0], pair[1])
 
         input_manager.allowed_devices = data.get("allowed_devices", [])
 

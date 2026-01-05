@@ -3553,6 +3553,7 @@ class iRacingControlApp:
         self.skip_auto_scan_once = False
         self._last_auto_pair: Tuple[str, str] = ("", "")
         self._session_scan_pending = False
+        self._telemetry_active = False
 
         # Auto-load tracking
         self.auto_load_attempted: set = set()
@@ -4610,7 +4611,7 @@ class iRacingControlApp:
 
             driver_info = self.ir["DriverInfo"]
             if not driver_info:
-                self._mark_session_inactive()
+                self._set_telemetry_active(False)
                 self.root.after(2000, self.auto_preset_loop)
                 return
 
@@ -4619,11 +4620,12 @@ class iRacingControlApp:
 
             weekend = self.ir["WeekendInfo"]
             if not weekend:
-                self._mark_session_inactive()
+                self._set_telemetry_active(False)
                 self.root.after(2000, self.auto_preset_loop)
                 return
 
             raw_track = weekend["TrackDisplayName"]
+            telemetry_reconnected = self._set_telemetry_active(True)
 
             # Clean names
             car_clean = "".join(
@@ -4645,6 +4647,8 @@ class iRacingControlApp:
                 if self.auto_detect.get():
                     self.auto_fill_ui(car_clean, track_clean)
                 if self.auto_scan_on_change.get():
+                    self._schedule_session_scan()
+                if telemetry_reconnected:
                     self._schedule_session_scan()
 
                 # Create skeleton if doesn't exist
@@ -4677,6 +4681,8 @@ class iRacingControlApp:
                         "active_vars"
                     ):
                         self.load_specific_preset(car_clean, track_clean)
+            elif telemetry_reconnected:
+                self._schedule_session_scan()
 
         except Exception as e:
             print(f"[AutoDetect] Error: {e}")
@@ -4752,12 +4758,27 @@ class iRacingControlApp:
 
         return False
 
+    def _set_telemetry_active(self, active: bool) -> bool:
+        """Track telemetry connection state and report reconnections."""
+        if active == self._telemetry_active:
+            return False
+
+        self._telemetry_active = active
+        if not active:
+            self._mark_session_inactive()
+            return False
+
+        self.auto_load_attempted.clear()
+        return True
+
     def _mark_session_inactive(self) -> None:
         """Reset session tracking when not connected to a session."""
         self.last_session_type = ""
         self.last_session_num = None
         self._last_auto_pair = ("", "")
         self._session_scan_pending = False
+        self.auto_load_attempted.clear()
+        self._telemetry_active = False
 
     def _schedule_session_scan(self) -> None:
         """Schedule a rescan and preset reload for a session change."""

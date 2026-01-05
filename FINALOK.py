@@ -3556,6 +3556,7 @@ class iRacingControlApp:
         self._telemetry_active = False
         self._rescan_restart_pair: Tuple[str, str] = ("", "")
         self._last_weekend_key: Optional[Tuple[Any, ...]] = None
+        self._skip_next_auto_load = False
 
         # Auto-load tracking
         self.auto_load_attempted: set = set()
@@ -4688,7 +4689,9 @@ class iRacingControlApp:
                 # Auto-load once
                 if (car_clean, track_clean) not in self.auto_load_attempted:
                     self.auto_load_attempted.add((car_clean, track_clean))
-                    if self.saved_presets[car_clean][track_clean].get(
+                    if self._skip_next_auto_load:
+                        self._skip_next_auto_load = False
+                    elif self.saved_presets[car_clean][track_clean].get(
                         "active_vars"
                     ):
                         self.load_specific_preset(car_clean, track_clean)
@@ -4758,6 +4761,9 @@ class iRacingControlApp:
                 self.skip_session_scan_once = False
                 return False
 
+            self._last_auto_pair = ("", "")
+            self.auto_load_attempted.clear()
+
             if self.auto_restart_on_race.get() and new_type == "Race":
                 self.pending_scan_on_start = True
                 mark_pending_scan()
@@ -4782,6 +4788,7 @@ class iRacingControlApp:
         self._last_auto_pair = ("", "")
         self.auto_load_attempted.clear()
         self._last_weekend_key = None
+        self._skip_next_auto_load = False
         return True
 
     def _mark_session_inactive(self) -> None:
@@ -4793,6 +4800,7 @@ class iRacingControlApp:
         self.auto_load_attempted.clear()
         self._telemetry_active = False
         self._last_weekend_key = None
+        self._skip_next_auto_load = False
 
     def _get_weekend_key(self, weekend: Dict[str, Any]) -> Optional[Tuple[Any, ...]]:
         """Return a stable identifier for the current weekend/session."""
@@ -4833,11 +4841,13 @@ class iRacingControlApp:
             return
 
         self._session_scan_pending = True
+        self._skip_next_auto_load = True
         self.root.after(200, self._auto_scan_and_load_preset)
 
     def _auto_scan_and_load_preset(self) -> None:
         """Scan controls and then reload the current car/track preset."""
         self._session_scan_pending = False
+        self._skip_next_auto_load = False
         self.scan_driver_controls()
 
         car = (self.combo_car.get().strip() or self.current_car).strip()

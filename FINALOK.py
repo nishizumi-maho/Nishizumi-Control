@@ -205,6 +205,15 @@ os.makedirs(CONFIG_FOLDER, exist_ok=True)
 CONFIG_FILE = os.path.join(CONFIG_FOLDER, "config_v3.json")
 PENDING_SCAN_FILE = os.path.join(CONFIG_FOLDER, "pending_scan.flag")
 ICON_CANDIDATES = ["DominantControl.ico", "DominantControl.png", "app.ico", "app.png"]
+STARTUP_FOLDER = os.path.join(
+    os.getenv("APPDATA") or os.path.expanduser("~"),
+    "Microsoft",
+    "Windows",
+    "Start Menu",
+    "Programs",
+    "Startup",
+)
+STARTUP_ENTRY_NAME = f"{APP_NAME}.bat"
 
 
 def resolve_resource_path(filename: str) -> Optional[str]:
@@ -301,9 +310,7 @@ if not os.path.exists(CONFIG_FILE):
 
 def restart_program():
     """Restart the application by closing and relaunching the process."""
-    python = sys.executable
-    script = os.path.abspath(sys.argv[0])
-    args = [python, script, *sys.argv[1:]]
+    args = _build_launch_command()
 
     try:
         subprocess.Popen(args, cwd=os.getcwd(), env=os.environ.copy())
@@ -320,6 +327,51 @@ def restart_program():
 
     # Ensure the current process exits so the window fully closes
     os._exit(0)
+
+
+def _build_launch_command() -> List[str]:
+    """Build a command list for launching the app (supports frozen exe)."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, *sys.argv[1:]]
+
+    script = os.path.abspath(sys.argv[0])
+    return [sys.executable, script, *sys.argv[1:]]
+
+
+def _startup_entry_path() -> Optional[str]:
+    if not STARTUP_FOLDER:
+        return None
+    return os.path.join(STARTUP_FOLDER, STARTUP_ENTRY_NAME)
+
+
+def _startup_entry_exists() -> bool:
+    path = _startup_entry_path()
+    return bool(path and os.path.exists(path))
+
+
+def set_startup_entry(enabled: bool) -> bool:
+    """Create or remove the Windows startup batch file."""
+    if not sys.platform.startswith("win"):
+        return False
+
+    path = _startup_entry_path()
+    if not path:
+        return False
+
+    try:
+        if enabled:
+            os.makedirs(STARTUP_FOLDER, exist_ok=True)
+            command_line = subprocess.list2cmdline(_build_launch_command())
+            content = f"@echo off\nstart \"\" {command_line}\n"
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(content)
+        else:
+            if os.path.exists(path):
+                os.remove(path)
+        return True
+    except Exception as exc:  # noqa: PERF203
+        print(f"[Startup] Failed to update entry: {exc}")
+        return False
 
 
 def mark_pending_scan():
@@ -3607,6 +3659,7 @@ class iRacingControlApp:
         self.keep_trying_targets = tk.BooleanVar(value=True)
         self.show_scan_popup = tk.BooleanVar(value=False)
         self.auto_save_presets = tk.BooleanVar(value=True)
+        self.start_with_windows = tk.BooleanVar(value=False)
         self.clear_target_bind: Optional[str] = None
         self.btn_clear_target_bind: Optional[tk.Button] = None
         self.voice_phrase_map: Dict[str, Callable] = {}
@@ -3615,6 +3668,7 @@ class iRacingControlApp:
 
         # Load configuration
         self.load_config()
+        self._apply_startup_preference(notify=False)
 
         # Create UI
         self._create_menu()
@@ -3637,6 +3691,26 @@ class iRacingControlApp:
 
         # Honor any pending scan requests (set before a restart)
         self.root.after(200, self._perform_pending_scan)
+
+    def _apply_startup_preference(self, notify: bool = False) -> None:
+        """Create or remove the startup entry based on current preference."""
+        enabled = self.start_with_windows.get()
+        success = set_startup_entry(enabled)
+        if success:
+            return
+
+        current = _startup_entry_exists()
+        self.start_with_windows.set(current)
+        if notify:
+            messagebox.showwarning(
+                "Start with Windows",
+                "Unable to update the Windows startup entry. "
+                "Please check permissions or try running as Administrator."
+            )
+
+    def _on_startup_toggle(self) -> None:
+        self._apply_startup_preference(notify=True)
+        self.schedule_save()
 
     def _voice_tuning_config(self) -> Dict[str, Any]:
         """Return sanitized voice tuning configuration from the UI."""
@@ -3850,6 +3924,13 @@ class iRacingControlApp:
             text="Show scan completion popup",
             variable=self.show_scan_popup,
             command=self.schedule_save
+        ).pack(anchor="w", pady=2)
+
+        tk.Checkbutton(
+            stability_frame,
+            text="Start with Windows",
+            variable=self.start_with_windows,
+            command=self._on_startup_toggle
         ).pack(anchor="w", pady=2)
 
         tk.Checkbutton(
@@ -5472,6 +5553,7 @@ class iRacingControlApp:
             "auto_restart_on_rescan": self.auto_restart_on_rescan.get(),
             "auto_restart_on_race": self.auto_restart_on_race.get(),
             "auto_save_presets": self.auto_save_presets.get(),
+            "start_with_windows": self.start_with_windows.get(),
             "keep_trying_targets": self.keep_trying_targets.get(),
             "show_scan_popup": self.show_scan_popup.get(),
             "clear_target_bind": self.clear_target_bind,
@@ -5530,6 +5612,7 @@ class iRacingControlApp:
         self.auto_restart_on_rescan.set(data.get("auto_restart_on_rescan", True))
         self.auto_restart_on_race.set(data.get("auto_restart_on_race", True))
         self.auto_save_presets.set(data.get("auto_save_presets", True))
+        self.start_with_windows.set(data.get("start_with_windows", False))
         self.keep_trying_targets.set(data.get("keep_trying_targets", True))
         self.show_scan_popup.set(data.get("show_scan_popup", False))
         self.clear_target_bind = data.get("clear_target_bind")

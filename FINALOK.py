@@ -2354,10 +2354,13 @@ class GenericController:
             if value is None:
                 return None
                 
+            if not self.is_float and isinstance(value, numbers.Real):
+                if not isinstance(value, (int, bool)):
+                    self.is_float = True
+
             if self.is_float:
                 return float(value)
-            else:
-                return int(round(value))
+            return int(round(value))
         except Exception:
             return None
 
@@ -4948,6 +4951,57 @@ class iRacingControlApp:
             if track in self.saved_presets[car]:
                 self.load_specific_preset(car, track)
 
+    def _detect_control_is_float(
+        self,
+        var_name: str,
+        value: numbers.Real
+    ) -> bool:
+        """Determine whether a driver control should be treated as float."""
+        header = None
+        if hasattr(self.ir, "var_headers_dict") and self.ir.var_headers_dict:
+            header = self.ir.var_headers_dict.get(var_name)
+
+        header_type = None
+        header_name = None
+        if header is not None:
+            if isinstance(header, dict):
+                header_type = (
+                    header.get("type")
+                    or header.get("varType")
+                    or header.get("vartype")
+                )
+                header_name = (
+                    header.get("typeName")
+                    or header.get("type_name")
+                    or header.get("name")
+                )
+            else:
+                for attr in ("type", "varType", "vartype"):
+                    header_type = getattr(header, attr, None)
+                    if header_type is not None:
+                        break
+                for attr in ("type_name", "typeName", "name"):
+                    header_name = getattr(header, attr, None)
+                    if header_name:
+                        break
+
+        if isinstance(header_name, str) and "float" in header_name.lower():
+            return True
+        if isinstance(header_type, str) and "float" in header_type.lower():
+            return True
+        if isinstance(header_type, int):
+            try:
+                enum_type = getattr(irsdk, "VarType", None)
+                float_type = getattr(enum_type, "float", None) if enum_type else None
+                if float_type is not None and header_type == float_type:
+                    return True
+            except Exception:
+                pass
+
+        return isinstance(value, numbers.Real) and not isinstance(
+            value, (int, bool)
+        )
+
     def scan_driver_controls(self):
         """Scan for dc* driver control variables in current car."""
         if self.auto_restart_on_rescan.get() and self.scans_since_restart >= 1:
@@ -5061,7 +5115,7 @@ class iRacingControlApp:
                 if not isinstance(value, numbers.Real):
                     continue
 
-                is_float = (float(value) % 1.0) != 0.0
+                is_float = self._detect_control_is_float(candidate, value)
                 found_vars.append((candidate, is_float))
 
         except Exception as e:

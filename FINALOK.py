@@ -4827,11 +4827,13 @@ class iRacingControlApp:
                 or self.current_track
             ).strip()
             restart_pair = (restart_car, restart_track)
-            if not (
-                restart_car
-                and restart_track
-                and restart_pair == self._rescan_restart_pair
-            ):
+            detected_pair = (detected_car, detected_track)
+            suppress_restart = (
+                detected_car
+                and detected_track
+                and detected_pair == self._rescan_restart_pair
+            )
+            if not suppress_restart:
                 self.pending_scan_on_start = True
                 if restart_car and restart_track:
                     self._rescan_restart_pair = restart_pair

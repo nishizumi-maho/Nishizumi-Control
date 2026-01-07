@@ -5539,9 +5539,6 @@ class iRacingControlApp:
                 return {"status": "unavailable"}
 
             found_vars = []
-            forced_float_vars = {
-                "dcBrakeBias",
-            }
 
             # Base candidates
             candidates = [
@@ -5595,8 +5592,7 @@ class iRacingControlApp:
                     if not isinstance(value, numbers.Real):
                         continue
 
-                    is_float = candidate in forced_float_vars or (float(value) % 1.0) != 0.0
-                    found_vars.append((candidate, is_float))
+                    found_vars.append((candidate, True))
 
             except Exception as e:
                 print(f"[Scan] Error reading variables: {e}")

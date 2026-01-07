@@ -30,6 +30,7 @@ import subprocess
 import importlib
 import queue
 import numbers
+from array import array
 import tempfile
 import wave
 from typing import Dict, List, Tuple, Optional, Any, Callable
@@ -5908,7 +5909,7 @@ class iRacingControlApp:
         for key in keys:
             value = self._read_ir_value(key)
 
-            if isinstance(value, (list, tuple)):
+            if isinstance(value, (list, tuple, array)):
                 if any(bool(v) for v in value):
                     return True
             elif isinstance(value, numbers.Real):
@@ -5925,7 +5926,7 @@ class iRacingControlApp:
         slips: List[float] = []
         for key in ["WheelSlip", "WheelSlipPct", "WheelSlipRatio", "TireSlip"]:
             value = self._read_ir_value(key)
-            if isinstance(value, (list, tuple)):
+            if isinstance(value, (list, tuple, array)):
                 slips.extend([self._safe_float(v, 0.0) for v in value])
 
         return slips

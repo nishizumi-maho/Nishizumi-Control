@@ -3501,8 +3501,24 @@ class GlobalTimingWindow(tk.Toplevel):
         profiles_frame.pack(fill="x", padx=10, pady=5)
 
         self.var_profile = tk.StringVar(
-            value=GLOBAL_TIMING.get("profile", "aggressive")
+            value=GLOBAL_TIMING.get("profile", "bot")
         )
+
+        tk.Radiobutton(
+            profiles_frame,
+            text="🤖 BOT (experimental, near-zero delay)",
+            variable=self.var_profile,
+            value="bot",
+            command=self._on_profile_change
+        ).pack(anchor="w", padx=5, pady=2)
+
+        tk.Radiobutton(
+            profiles_frame,
+            text="🤖 BOT Stable (fast, more reliable)",
+            variable=self.var_profile,
+            value="bot_safe",
+            command=self._on_profile_change
+        ).pack(anchor="w", padx=5, pady=2)
 
         tk.Radiobutton(
             profiles_frame,
@@ -3525,22 +3541,6 @@ class GlobalTimingWindow(tk.Toplevel):
             text="😎 Relaxed (well-spaced)",
             variable=self.var_profile,
             value="relaxed",
-            command=self._on_profile_change
-        ).pack(anchor="w", padx=5, pady=2)
-
-        tk.Radiobutton(
-            profiles_frame,
-            text="🤖 BOT (experimental, near-zero delay)",
-            variable=self.var_profile,
-            value="bot",
-            command=self._on_profile_change
-        ).pack(anchor="w", padx=5, pady=2)
-
-        tk.Radiobutton(
-            profiles_frame,
-            text="🤖 BOT Stable (fast, more reliable)",
-            variable=self.var_profile,
-            value="bot_safe",
             command=self._on_profile_change
         ).pack(anchor="w", padx=5, pady=2)
 

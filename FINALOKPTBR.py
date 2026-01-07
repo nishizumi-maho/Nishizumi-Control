@@ -821,7 +821,6 @@ class InputManager:
         self.active: bool = False
         self.allowed_devices: List[str] = []
         self.safe_mode: bool = False
-        self.show_all_devices: bool = os.getenv("DOMINANTCONTROL_SHOW_ALL_DEVICES", "0") == "1"
         self._input_thread: Optional[threading.Thread] = None
         self._input_watchdog = Watchdog(
             "InputManager", interval_s=2.5, timeout_s=8.0, on_trip=self._restart_input_loop
@@ -831,38 +830,16 @@ class InputManager:
 
         if HAS_PYGAME:
             try:
-                self._apply_joystick_hints()
+                if self.preserve_game_ffb:
+                    # Prefer the legacy/direct drivers instead of HIDAPI/XInput to avoid taking over FFB
+                    os.environ.setdefault("SDL_HINT_JOYSTICK_HIDAPI", "0")
+                    os.environ.setdefault("SDL_HINT_XINPUT_ENABLED", "0")
+                    os.environ.setdefault("SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
                 pygame.init()
                 pygame.joystick.init()
                 self._start_input_loop()
             except Exception as e:
                 print(f"[InputManager] Erro ao iniciar o pygame: {e}")
-
-    def _apply_joystick_hints(self):
-        if not self.preserve_game_ffb or self.show_all_devices:
-            os.environ["SDL_HINT_JOYSTICK_HIDAPI"] = "1"
-            os.environ["SDL_HINT_XINPUT_ENABLED"] = "1"
-        else:
-            # Prefer the legacy/direct drivers instead of HIDAPI/XInput to avoid taking over FFB
-            os.environ["SDL_HINT_JOYSTICK_HIDAPI"] = "0"
-            os.environ["SDL_HINT_XINPUT_ENABLED"] = "0"
-        os.environ.setdefault("SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
-
-    def set_show_all_devices(self, enabled: bool):
-        """Toggle discovery of all USB devices (including HIDAPI/XInput)."""
-        self.show_all_devices = enabled
-        if self.safe_mode or not HAS_PYGAME:
-            return
-        try:
-            pygame.quit()
-        except Exception:
-            pass
-        self._apply_joystick_hints()
-        try:
-            pygame.init()
-            pygame.joystick.init()
-        except Exception as exc:
-            print(f"[InputManager] Erro ao reinicializar pygame: {exc}")
 
     def set_safe_mode(self, enabled: bool):
         """
@@ -1707,7 +1684,6 @@ class DeviceSelector(tk.Toplevel):
         self.title("Gerenciar dispositivos USB")
         self.geometry("450x400")
         self.callback = callback
-        self.show_all_var = tk.BooleanVar(value=input_manager.show_all_devices)
 
         tk.Label(
             self,
@@ -1722,25 +1698,28 @@ class DeviceSelector(tk.Toplevel):
             fg="gray"
         ).pack()
 
-        tk.Checkbutton(
-            self,
-            text="Mostrar todos os dispositivos conectados (inclui HIDAPI/XInput)",
-            variable=self.show_all_var,
-            command=self._toggle_show_all
-        ).pack(pady=(4, 0))
-
-        tk.Button(
-            self,
-            text="Atualizar lista de dispositivos",
-            command=self._refresh_devices
-        ).pack(pady=(6, 0))
-
         self.frame_list = tk.Frame(self)
         self.frame_list.pack(fill="both", expand=True, padx=10, pady=10)
 
         self.check_vars: Dict[str, tk.BooleanVar] = {}
-        self._current_allowed = current_allowed
-        self._refresh_devices()
+        all_devices = input_manager.get_all_devices()
+
+        for idx, name in all_devices:
+            var = tk.BooleanVar()
+            if current_allowed:
+                var.set(name in current_allowed)
+            else:
+                # First run defaults to nothing selected
+                var.set(False)
+
+            chk = tk.Checkbutton(
+                self.frame_list, 
+                text=name, 
+                variable=var, 
+                anchor="w"
+            )
+            chk.pack(fill="x")
+            self.check_vars[name] = var
 
         tk.Button(
             self,
@@ -1749,33 +1728,6 @@ class DeviceSelector(tk.Toplevel):
             bg="#90ee90",
             height=2
         ).pack(fill="x", padx=10, pady=10)
-
-    def _toggle_show_all(self):
-        input_manager.set_show_all_devices(self.show_all_var.get())
-        self._refresh_devices()
-
-    def _refresh_devices(self):
-        for child in self.frame_list.winfo_children():
-            child.destroy()
-        self.check_vars.clear()
-
-        all_devices = input_manager.get_all_devices()
-        for _, name in all_devices:
-            var = tk.BooleanVar()
-            if self._current_allowed:
-                var.set(name in self._current_allowed)
-            else:
-                # First run defaults to nothing selected
-                var.set(False)
-
-            chk = tk.Checkbutton(
-                self.frame_list,
-                text=name,
-                variable=var,
-                anchor="w"
-            )
-            chk.pack(fill="x")
-            self.check_vars[name] = var
 
     def save(self):
         """Save device selection and close dialog."""
@@ -6217,7 +6169,6 @@ class iRacingControlApp:
             "pending_scan_on_start": self.pending_scan_on_start,
             "rescan_restart_pair": list(self._rescan_restart_pair),
             "allowed_devices": input_manager.allowed_devices,
-            "show_all_devices": input_manager.show_all_devices,
             "saved_presets": self.saved_presets,
             "car_overlay_config": self.car_overlay_config,
             "car_overlay_feedback": self.car_overlay_feedback,
@@ -6283,7 +6234,6 @@ class iRacingControlApp:
             self._rescan_restart_pair = (pair[0], pair[1])
 
         input_manager.allowed_devices = data.get("allowed_devices", [])
-        input_manager.set_show_all_devices(data.get("show_all_devices", False))
 
         self.saved_presets = data.get("saved_presets", {})
         self.car_overlay_config = data.get("car_overlay_config", {})

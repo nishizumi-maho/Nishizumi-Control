@@ -2481,6 +2481,9 @@ class GenericController:
         cancelled = False
         cleared = False
         success = False
+        last_diff: Optional[float] = None
+        timing_profile = _normalize_timing_config(GLOBAL_TIMING).get("profile", "aggressive")
+        is_bot_profile = timing_profile == "bot"
 
         try:
             while True:
@@ -2534,6 +2537,11 @@ class GenericController:
 
                 diff = active_target - current
                 abs_diff = abs(diff)
+                overshot = (
+                    last_diff is not None
+                    and diff != 0
+                    and ((diff > 0 > last_diff) or (diff < 0 < last_diff))
+                )
 
                 if self.is_float:
                     tolerance = 0.001
@@ -2551,8 +2559,26 @@ class GenericController:
                     break
 
                 key = self.key_increase if diff > 0 else self.key_decrease
-                click_pulse(key, self.is_float)
-                time.sleep(0.02)
+                if is_bot_profile:
+                    if self.is_float:
+                        base_step = self._float_step if self._float_step else 0.001
+                    else:
+                        base_step = 1.0
+
+                    close_threshold = max(0.001, base_step)
+                    if abs_diff <= close_threshold * 2 or overshot:
+                        _direct_pulse(key, press_ms=5, interval_ms=5)
+                        time.sleep(0.05)
+                    else:
+                        click_pulse(key, self.is_float)
+                        if abs_diff <= close_threshold * 4:
+                            time.sleep(0.03)
+                        else:
+                            time.sleep(0.02)
+                else:
+                    click_pulse(key, self.is_float)
+                    time.sleep(0.02)
+                last_diff = diff
 
         except Exception as exc:
             print(f"[GenericController] Exception: {exc}")

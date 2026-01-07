@@ -3769,7 +3769,7 @@ class iRacingControlApp:
         # Settings
         self.use_keyboard_only = tk.BooleanVar(value=False)
         self.use_tts = tk.BooleanVar(value=False)
-        self.use_voice = tk.BooleanVar(value=False)
+        self.use_voice = tk.BooleanVar(value=True)
         self.voice_engine = tk.StringVar(value="speech")
         self.vosk_model_path = tk.StringVar(value="")
         self.whisper_binary_path = tk.StringVar(value="")
@@ -4046,7 +4046,10 @@ class iRacingControlApp:
         helper_text = (
             "Follow the steps below in order: 1) pick your car and track, "
             "2) confirm your input devices, then 3) scan driver controls. "
-            "Use CONFIG mode when changing bindings and RUNNING mode when driving."
+            "If the car/track selectors are greyed out, iRacing will auto-handle them "
+            "when you enter a session. Join an iRacing session first to work with "
+            "presets, or disable the “lock car/track selection” checkbox in the Options "
+            "tab. Use CONFIG mode when changing bindings and RUNNING mode when driving."
         )
         tk.Label(
             helper_frame,
@@ -4418,13 +4421,7 @@ class iRacingControlApp:
         self.voice_window.geometry("720x520")
 
         def _cleanup():
-            if self.voice_window and self.voice_window.winfo_exists():
-                self.voice_window.destroy()
-            self.voice_window = None
-            self.voice_engine_combo = None
-            self.btn_vosk_model = None
-            self.mic_combo = None
-            self.audio_output_combo = None
+            self.close_voice_audio_window()
 
         self.voice_window.protocol("WM_DELETE_WINDOW", _cleanup)
 
@@ -4440,10 +4437,26 @@ class iRacingControlApp:
         tk.Button(
             self.voice_window,
             text="💾 SAVE",
-            command=self.schedule_save,
+            command=self.save_and_close_voice_audio,
             bg="#90ee90",
             height=2
         ).pack(fill="x", padx=10, pady=(4, 10))
+
+    def save_and_close_voice_audio(self) -> None:
+        """Save voice/audio preferences and close the options window."""
+        self.schedule_save()
+        self.close_voice_audio_window()
+
+    def close_voice_audio_window(self) -> None:
+        """Close and clean up the voice/audio options window."""
+        if getattr(self, "voice_window", None) is not None:
+            if self.voice_window.winfo_exists():
+                self.voice_window.destroy()
+        self.voice_window = None
+        self.voice_engine_combo = None
+        self.btn_vosk_model = None
+        self.mic_combo = None
+        self.audio_output_combo = None
 
     def _build_voice_audio_tab(self, parent: tk.Widget):
         """Construct the tab containing voice and audio controls."""
@@ -5954,7 +5967,7 @@ class iRacingControlApp:
 
         self.use_keyboard_only.set(data.get("use_keyboard_only", False))
         self.use_tts.set(data.get("use_tts", False))
-        self.use_voice.set(data.get("use_voice", False))
+        self.use_voice.set(data.get("use_voice", True))
         self.voice_engine.set(data.get("voice_engine", "speech"))
         self.vosk_model_path.set(data.get("vosk_model_path", ""))
         self.whisper_binary_path.set(data.get("whisper_binary_path", ""))

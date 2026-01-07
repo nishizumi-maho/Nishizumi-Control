@@ -4037,11 +4037,19 @@ class iRacingControlApp:
         )
         self.btn_mode.pack(fill="x")
 
-        helper_frame = tk.LabelFrame(
+        self.show_getting_started = tk.BooleanVar(value=True)
+        self.helper_frame = tk.LabelFrame(
             self.root,
             text="Getting started"
         )
-        helper_frame.pack(fill="x", padx=10, pady=(0, 6))
+
+        helper_actions = tk.Frame(self.helper_frame)
+        helper_actions.pack(fill="x", padx=8, pady=(6, 0))
+        ttk.Button(
+            helper_actions,
+            text="Dismiss",
+            command=self._dismiss_getting_started
+        ).pack(side="right")
 
         helper_text = (
             "Follow the steps below in order: 1) pick your car and track, "
@@ -4052,19 +4060,21 @@ class iRacingControlApp:
             "tab. Use CONFIG mode when changing bindings and RUNNING mode when driving."
         )
         tk.Label(
-            helper_frame,
+            self.helper_frame,
             text=helper_text,
             wraplength=760,
             justify="left"
         ).pack(fill="x", padx=8, pady=4)
 
-        main_tabs = ttk.Notebook(self.root)
-        main_tabs.pack(fill="both", expand=True, padx=10, pady=5)
+        self.main_tabs = ttk.Notebook(self.root)
+        self.main_tabs.pack(fill="both", expand=True, padx=10, pady=5)
 
-        main_tab = ttk.Frame(main_tabs)
-        options_tab = ttk.Frame(main_tabs)
-        main_tabs.add(main_tab, text="🏁 Main")
-        main_tabs.add(options_tab, text="⚙️ Options")
+        main_tab = ttk.Frame(self.main_tabs)
+        options_tab = ttk.Frame(self.main_tabs)
+        self.main_tabs.add(main_tab, text="🏁 Main")
+        self.main_tabs.add(options_tab, text="⚙️ Options")
+
+        self._toggle_getting_started()
 
         setup_container = tk.Frame(main_tab)
         setup_container.pack(fill="x", expand=False, padx=5, pady=(5, 2))
@@ -4222,6 +4232,13 @@ class iRacingControlApp:
             command=self.schedule_save
         ).pack(anchor="w", padx=8, pady=2)
 
+        tk.Checkbutton(
+            general_left,
+            text="Show getting started tips",
+            variable=self.show_getting_started,
+            command=self._toggle_getting_started
+        ).pack(anchor="w", padx=8, pady=(2, 8))
+
         stability_frame = tk.LabelFrame(
             general_container,
             text="Automation & Shortcuts"
@@ -4311,6 +4328,25 @@ class iRacingControlApp:
         self.update_preset_ui()
         self._refresh_clear_target_bind_button()
         self._refresh_manual_rescan_bind_button()
+
+    def _dismiss_getting_started(self) -> None:
+        self.show_getting_started.set(False)
+        self._toggle_getting_started()
+
+    def _toggle_getting_started(self) -> None:
+        if self.show_getting_started.get():
+            if not self.helper_frame.winfo_ismapped():
+                self.helper_frame.pack(
+                    fill="x",
+                    padx=10,
+                    pady=(0, 6),
+                    before=self.main_tabs
+                )
+        else:
+            if self.helper_frame.winfo_ismapped():
+                self.helper_frame.pack_forget()
+        self.main_tabs.pack_configure(fill="both", expand=True)
+        self.root.update_idletasks()
 
     # ------------------------------------------------------------------
     # Options UI

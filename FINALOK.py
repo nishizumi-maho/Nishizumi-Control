@@ -3702,6 +3702,7 @@ class iRacingControlApp:
         self.root.title(f"{APP_NAME} v{APP_VERSION}")
         self.root.geometry("820x900")
         apply_app_icon(self.root)
+        self._configure_styles()
 
         # Thread-safe UI queue
         self._uiq: "queue.Queue[Tuple[Callable, tuple, dict]]" = queue.Queue()
@@ -3972,6 +3973,36 @@ class iRacingControlApp:
             label="Restore Defaults (Delete Config)",
             command=self.restore_defaults
         )
+
+    def _configure_styles(self) -> None:
+        """Improve UI readability with consistent fonts and spacing."""
+        base_font = ("Segoe UI", 10)
+        heading_font = ("Segoe UI Semibold", 10)
+        button_font = ("Segoe UI Semibold", 10)
+
+        self.root.option_add("*Font", base_font)
+        self.root.option_add("*Label.Font", base_font)
+        self.root.option_add("*LabelFrame.Font", heading_font)
+        self.root.option_add("*Button.Font", button_font)
+        self.root.option_add("*Button.Padx", 10)
+        self.root.option_add("*Button.Pady", 4)
+        self.root.option_add("*Button.BorderWidth", 1)
+        self.root.option_add("*Button.Relief", "raised")
+        self.root.option_add("*Checkbutton.Font", base_font)
+        self.root.option_add("*Radiobutton.Font", base_font)
+        self.root.option_add("*Entry.Font", base_font)
+
+        style = ttk.Style(self.root)
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
+
+        style.configure("TLabel", font=base_font)
+        style.configure("TLabelFrame.Label", font=heading_font)
+        style.configure("TButton", font=button_font, padding=(10, 6))
+        style.configure("TCheckbutton", font=base_font, padding=(6, 2))
+        style.configure("TRadiobutton", font=base_font, padding=(6, 2))
+        style.configure("TNotebook.Tab", font=heading_font, padding=(10, 6))
+        style.configure("TCombobox", padding=4)
 
     def _create_main_ui(self):
         """Create main user interface."""

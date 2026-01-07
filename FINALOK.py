@@ -2335,6 +2335,7 @@ class GenericController:
         self._requested_target: Optional[float] = None
         self._clear_requested = False
         self._worker_thread: Optional[threading.Thread] = None
+        self._float_step: Optional[float] = None
 
     def read_telemetry(self) -> Optional[float]:
         """
@@ -2372,24 +2373,37 @@ class GenericController:
         if baseline is None:
             return None
 
-        # Pulse upward and measure the delta
-        click_pulse(self.key_increase, is_float=True)
-        time.sleep(0.08)
-        raised = self.read_telemetry()
+        deltas: List[float] = []
+        last_known = float(baseline)
+        for _ in range(3):
+            # Pulse upward and measure the delta
+            click_pulse(self.key_increase, is_float=True)
+            time.sleep(0.08)
+            raised = self.read_telemetry()
 
-        if raised is None:
+            if raised is None:
+                continue
+
+            delta = abs(float(raised) - last_known)
+            if delta >= 1e-4:
+                deltas.append(delta)
+
+            # Try to return near the starting point
+            click_pulse(self.key_decrease, is_float=True)
+            time.sleep(0.08)
+            restored = self.read_telemetry()
+            if restored is not None:
+                last_known = float(restored)
+
+        if not deltas:
             return None
 
-        step = abs(float(raised) - float(baseline))
-
-        # Try to return near the starting point
-        click_pulse(self.key_decrease, is_float=True)
-        time.sleep(0.08)
-
-        if step < 1e-6:
+        deltas.sort()
+        step = deltas[len(deltas) // 2]
+        if step < 1e-4:
             return None
 
-        return step
+        return round(step, 6)
 
     def _resolve_target(self, target: float) -> float:
         """Align float targets to the nearest reachable increment when needed."""
@@ -2397,6 +2411,7 @@ class GenericController:
             return target
 
         step = self._detect_float_step()
+        self._float_step = step
         current = self.read_telemetry()
 
         if step is None or step <= 0 or current is None:
@@ -2520,9 +2535,13 @@ class GenericController:
                 diff = active_target - current
                 abs_diff = abs(diff)
 
-                if self.is_float and abs_diff < 0.001:
-                    success = True
-                elif not self.is_float and diff == 0:
+                if self.is_float:
+                    tolerance = 0.001
+                    if self._float_step and self._float_step > 0:
+                        tolerance = max(tolerance, self._float_step / 2.0)
+                    if abs_diff <= tolerance:
+                        success = True
+                elif diff == 0:
                     success = True
 
                 if success:

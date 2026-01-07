@@ -9,16 +9,18 @@ An accessibility-focused control manager for iRacing that provides:
 - Per-car and per-track preset management
 - Macro/combo system for quick adjustments
 
-![Version](https://img.shields.io/badge/version-4.0.0-blue.svg)
+![Version](https://img.shields.io/badge/version-5.0.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 ## Overview
 Dominant Control is a single-file application (`FINALOK.py`) that manages iRacing’s driver-adjustable controls. It includes optional text-to-speech feedback, joystick support, and offline voice control when the related dependencies are installed.
 
-## Release 4.0.0 Highlights
-- **Start with Windows:** new toggle to add/remove a startup entry so the app can launch automatically on login.
-- **Rescan workflow:** optional restart-before-rescan setting to improve control detection after the first scan and keep presets in sync.
+## Release 5.0.0 Highlights
+- **Refreshed layout:** new Main/Options tabs with a guided Step 1–3 setup flow for car/track, device confirmation, and control scanning.
+- **Voice & audio window:** all voice engines, devices, and tuning controls now live in **Options → Voice/Audio Settings**.
+- **Automation & shortcuts:** expanded options for rescan/restart automation plus manual rescan and clear-target hotkeys.
+- **Whisper.cpp support:** optional offline recognition via a local whisper.cpp executable and GGML/GGUF models.
 
 ## Supported Platforms & Requirements
 - **OS:** Windows 10/11 (64-bit)

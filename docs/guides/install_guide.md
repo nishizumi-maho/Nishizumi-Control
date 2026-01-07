@@ -1,4 +1,4 @@
-# Installation & Setup Guide (v3.0.0)
+# Installation & Setup Guide (v5.0.0)
 
 This guide walks through installing Dominant Control, enabling every option, and keeping the app healthy over time.
 
@@ -23,7 +23,7 @@ This guide walks through installing Dominant Control, enabling every option, and
    ```
 3. Start the app:
    ```bash
-   python main.py
+   python FINALOK.py
    ```
 
 ## 3. First Launch Checklist
@@ -36,8 +36,8 @@ This guide walks through installing Dominant Control, enabling every option, and
 7. **Timing profile:** select Aggressive, Casual, Relaxed, or configure **Custom** press/hold timings.
 8. **Save profile:** enter car and track names and click **Save Current**. Profiles auto-load on match.
 
-## 4. Voice Command Engines (Vosk or Whisper)
-You can run voice commands with either Vosk (lightweight) or Whisper (higher accuracy, can use GPU). Install dependencies from `requirements.txt` first.
+## 4. Voice Command Engines (Vosk or whisper.cpp)
+You can run voice commands with either Vosk (lightweight) or whisper.cpp (offline, local model). Install dependencies from `requirements.txt` first.
 
 ### A) Vosk Setup (CPU-friendly)
 1. Install voice dependencies: `vosk`, `SpeechRecognition`, `pyaudio`.
@@ -46,18 +46,21 @@ You can run voice commands with either Vosk (lightweight) or Whisper (higher acc
 4. In the app settings, set **Vosk model path** to the extracted folder and pick **Vosk** as the voice engine.
 5. Enable **Voice Commands** and test phrases like “Brake bias up” or “Traction control preset two.”
 
-### B) Whisper Setup (accuracy-focused, optional GPU)
-1. Ensure `faster-whisper` is installed (included in `requirements.txt`).
-2. Download a CTranslate2 Whisper model from the [faster-whisper collection](https://huggingface.co/collections/Systran/faster-whisper-655b5dd2959f16f30bdd5e23) — start with **tiny**/**base** for CPU or **small**/**medium**/**large-v2** if you have GPU headroom.
-3. Extract the model folder somewhere stable (e.g., `C:\whisper\faster-whisper-small`). The folder should contain `model.bin` and tokenizer files.
-4. In the app, set the voice engine to **Whisper**, click **Select Whisper model folder**, and point to the extracted folder.
-5. Enable **Voice Commands** and test your phrases. If recognition lags, try a smaller model or keep the model on a faster drive.
+### B) whisper.cpp Setup (offline, local models)
+1. Download a whisper.cpp build for Windows and a compatible GGML/GGUF model.
+2. Place the executable and model file somewhere stable (e.g., `C:\whisper\`).
+3. In the app, set the voice engine to **whisper.cpp**.
+4. Click **Select whisper.cpp** to point at the executable.
+5. Click **Select Whisper Model...** and choose the `.bin` or `.gguf` model file.
+6. Enable **Voice Commands** and test your phrases. If recognition lags, try a smaller model.
 
 ## 5. Feature-by-Feature Guide
 - **CONFIG / RUNNING Modes:** configure in CONFIG, drive in RUNNING. The mode button clearly shows the active state.
+- **Main/Options Layout:** Main tab holds the Step 1–3 setup flow, while Options contains automation toggles and shortcuts.
 - **Control Tabs:** each detected driver control exposes Increase/Decrease bindings, four presets, and HUD visibility.
 - **⚡ Combos:** build multi-control macros (e.g., rain/dry setups) and bind them to one key or button.
 - **Timing Profiles:** choose Aggressive/Casual/Relaxed or fine-tune Custom press and release timings.
+- **Voice/Audio Settings:** open **Options → Voice/Audio Settings** for engines, devices, and tuning.
 - **HUD / Overlay:** toggle variables, style colors/fonts/opacity, and drag placement. Settings save per car.
 - **Device Management:**
   - **Keyboard Only Mode:** restarts the app with keyboard-only input (best for avoiding FFB conflicts).

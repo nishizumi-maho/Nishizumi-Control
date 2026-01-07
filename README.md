@@ -50,8 +50,7 @@ See [`requirements.txt`](requirements.txt) for the full Python dependency list.
 - **Voice commands:** Requires `speech_recognition` and `vosk` (plus a downloaded Vosk model).
 
 ## Known Issues
-1. Sometimes when changing sessions with a different car or track, the app may not update the car and track profile. Scan controls again to fix it. This is expected to work fine when changing from practice to qualifying in the same session.
-2. Some cars should show float values (e.g., brake bias) inside the app, but they show integer numbers only even if the car allows float values in adjustments. This is suspected to be a telemetry issue from iRacing and is being investigated.
+1. The application becomes “frozen” while iRacing is loading and will only unfreeze after the game has fully loaded. The application does not stop working; it is simply scanning for large changes and fluctuations in the telemetry during the simulation’s loading process.
 
 ## License & Attribution
 - Licensed under the **MIT License** (see [`license.md`](license.md)).

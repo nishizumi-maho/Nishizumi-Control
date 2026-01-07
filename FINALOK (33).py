@@ -2745,7 +2745,7 @@ class ControlTab(tk.Frame):
         tk.Label(
             header,
             text="Macro value",
-            width=10,
+            width=8,
             anchor="w",
             font=("Arial", 8, "bold")
         ).pack(side="left", padx=5)
@@ -2759,7 +2759,7 @@ class ControlTab(tk.Frame):
         tk.Label(
             header,
             text="Voice trigger phrase",
-            width=20,
+            width=18,
             anchor="w",
             font=("Arial", 8, "bold")
         ).pack(side="left", padx=5)
@@ -3866,7 +3866,7 @@ class iRacingControlApp:
         setup_tab = ttk.Frame(main_tabs)
         controls_tab = ttk.Frame(main_tabs)
         main_tabs.add(setup_tab, text="Setup")
-        main_tabs.add(controls_tab, text="Controls")
+        main_tabs.add(controls_tab, text="🎮 Controls")
 
         setup_container = tk.Frame(setup_tab)
         setup_container.pack(fill="both", expand=True, padx=5, pady=5)

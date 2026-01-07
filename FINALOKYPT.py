@@ -2746,7 +2746,7 @@ class ControlTab(tk.Frame):
         tk.Label(
             header,
             text="Valor da macro",
-            width=10,
+            width=8,
             anchor="w",
             font=("Arial", 8, "bold")
         ).pack(side="left", padx=5)
@@ -2760,7 +2760,7 @@ class ControlTab(tk.Frame):
         tk.Label(
             header,
             text="Frase de gatilho por voz",
-            width=20,
+            width=18,
             anchor="w",
             font=("Arial", 8, "bold")
         ).pack(side="left", padx=5)

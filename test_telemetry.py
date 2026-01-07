@@ -48,8 +48,7 @@ def collect_dc_vars(ir: irsdk.IRSDK) -> List[Tuple[str, bool]]:
             continue
         if not isinstance(value, numbers.Real):
             continue
-        is_float = (float(value) % 1.0) != 0.0
-        found_vars.append((candidate, is_float))
+        found_vars.append((candidate, True))
 
     return found_vars
 

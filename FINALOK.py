@@ -374,26 +374,43 @@ def set_startup_entry(enabled: bool) -> bool:
         return False
 
 
-def mark_pending_scan():
+def mark_pending_scan(*, silent: bool = False) -> None:
     """Persist a marker so the next launch triggers a rescan."""
     try:
+        payload = {"rescan": True, "silent": silent}
         with open(PENDING_SCAN_FILE, "w", encoding="utf-8") as flag:
-            flag.write("rescan")
+            json.dump(payload, flag)
     except Exception as exc:
         print(f"[PendingScan] Failed to persist marker: {exc}")
 
 
-def consume_pending_scan() -> bool:
-    """Return True if a persisted rescan marker was present and clear it."""
+def consume_pending_scan() -> Tuple[bool, bool]:
+    """Return (has_marker, silent) for a pending rescan marker and clear it."""
     if not os.path.exists(PENDING_SCAN_FILE):
-        return False
+        return False, False
 
+    silent = False
     try:
-        os.remove(PENDING_SCAN_FILE)
-    except Exception as exc:
-        print(f"[PendingScan] Failed to clear marker: {exc}")
+        with open(PENDING_SCAN_FILE, "r", encoding="utf-8") as flag:
+            try:
+                payload = json.load(flag)
+            except Exception:
+                flag.seek(0)
+                payload = flag.read().strip()
 
-    return True
+        if isinstance(payload, dict):
+            silent = bool(payload.get("silent", False))
+        elif isinstance(payload, str):
+            silent = "silent" in payload.lower()
+    except Exception as exc:
+        print(f"[PendingScan] Failed to read marker: {exc}")
+    finally:
+        try:
+            os.remove(PENDING_SCAN_FILE)
+        except Exception as exc:
+            print(f"[PendingScan] Failed to clear marker: {exc}")
+
+    return True, silent
 
 
 # ======================================================================
@@ -3757,6 +3774,7 @@ class iRacingControlApp:
         self._rescan_restart_pair: Tuple[str, str] = ("", "")
         self._last_weekend_key: Optional[Tuple[Any, ...]] = None
         self._skip_next_auto_load = False
+        self._pending_scan_silent = False
 
         # Auto-load tracking
         self.auto_load_attempted: set = set()
@@ -3809,6 +3827,7 @@ class iRacingControlApp:
         self.auto_save_presets = tk.BooleanVar(value=True)
         self.lock_preset_selection = tk.BooleanVar(value=True)
         self.start_with_windows = tk.BooleanVar(value=False)
+        self.show_getting_started = tk.BooleanVar(value=True)
         self.clear_target_bind: Optional[str] = None
         self.btn_clear_target_bind: Optional[tk.Button] = None
         self.manual_rescan_bind: Optional[str] = None
@@ -3816,6 +3835,15 @@ class iRacingControlApp:
         self.voice_phrase_map: Dict[str, Callable] = {}
         self._voice_traces_attached = False
         self._auto_save_job: Optional[str] = None
+        self.getting_started_window: Optional[tk.Toplevel] = None
+        self.getting_started_text = (
+            "Follow the steps below in order: 1) pick your car and track, "
+            "2) confirm your input devices, then 3) scan driver controls. "
+            "If the car/track selectors are greyed out, iRacing will auto-handle them "
+            "when you enter a session. Join an iRacing session first to work with "
+            "presets, or disable the “lock car/track selection” checkbox in the Options "
+            "tab. Use CONFIG mode when changing bindings and RUNNING mode when driving."
+        )
 
         # Load configuration
         self.load_config()
@@ -3825,6 +3853,7 @@ class iRacingControlApp:
         self._create_menu()
         self._create_main_ui()
         self._update_voice_controls()
+        self.root.after(300, self._maybe_show_getting_started)
 
         # Initialize devices
         self.update_safe_mode()
@@ -4035,36 +4064,16 @@ class iRacingControlApp:
             font=("Arial", 10, "bold"),
             height=2
         )
-        self.btn_mode.pack(fill="x")
+        self.btn_mode.pack(side="left", fill="x", expand=True)
 
-        self.show_getting_started = tk.BooleanVar(value=True)
-        self.helper_frame = tk.LabelFrame(
-            self.root,
-            text="Getting started"
-        )
-
-        helper_actions = tk.Frame(self.helper_frame)
-        helper_actions.pack(fill="x", padx=8, pady=(6, 0))
-        ttk.Button(
-            helper_actions,
-            text="Dismiss",
-            command=self._dismiss_getting_started
-        ).pack(side="right")
-
-        helper_text = (
-            "Follow the steps below in order: 1) pick your car and track, "
-            "2) confirm your input devices, then 3) scan driver controls. "
-            "If the car/track selectors are greyed out, iRacing will auto-handle them "
-            "when you enter a session. Join an iRacing session first to work with "
-            "presets, or disable the “lock car/track selection” checkbox in the Options "
-            "tab. Use CONFIG mode when changing bindings and RUNNING mode when driving."
-        )
-        tk.Label(
-            self.helper_frame,
-            text=helper_text,
-            wraplength=760,
-            justify="left"
-        ).pack(fill="x", padx=8, pady=4)
+        tk.Button(
+            mode_frame,
+            text="Getting Started",
+            command=self.open_getting_started_window,
+            font=("Arial", 9, "bold"),
+            padx=8,
+            pady=2
+        ).pack(side="right", padx=(6, 0))
 
         self.main_tabs = ttk.Notebook(self.root)
         self.main_tabs.pack(fill="both", expand=True, padx=10, pady=5)
@@ -4073,8 +4082,6 @@ class iRacingControlApp:
         options_tab = ttk.Frame(self.main_tabs)
         self.main_tabs.add(main_tab, text="🏁 Main")
         self.main_tabs.add(options_tab, text="⚙️ Options")
-
-        self._toggle_getting_started()
 
         setup_container = tk.Frame(main_tab)
         setup_container.pack(fill="x", expand=False, padx=5, pady=(5, 2))
@@ -4234,9 +4241,9 @@ class iRacingControlApp:
 
         tk.Checkbutton(
             general_left,
-            text="Show getting started tips",
+            text="Show getting started popup on startup",
             variable=self.show_getting_started,
-            command=self._toggle_getting_started
+            command=self.schedule_save
         ).pack(anchor="w", padx=8, pady=(2, 8))
 
         stability_frame = tk.LabelFrame(
@@ -4329,24 +4336,49 @@ class iRacingControlApp:
         self._refresh_clear_target_bind_button()
         self._refresh_manual_rescan_bind_button()
 
-    def _dismiss_getting_started(self) -> None:
-        self.show_getting_started.set(False)
-        self._toggle_getting_started()
+    def open_getting_started_window(self) -> None:
+        """Open the getting started guide in a popup window."""
+        if self.getting_started_window and self.getting_started_window.winfo_exists():
+            self.getting_started_window.lift()
+            return
 
-    def _toggle_getting_started(self) -> None:
-        if self.show_getting_started.get():
-            if not self.helper_frame.winfo_ismapped():
-                self.helper_frame.pack(
-                    fill="x",
-                    padx=10,
-                    pady=(0, 6),
-                    before=self.main_tabs
-                )
-        else:
-            if self.helper_frame.winfo_ismapped():
-                self.helper_frame.pack_forget()
-        self.main_tabs.pack_configure(fill="both", expand=True)
-        self.root.update_idletasks()
+        self.getting_started_window = tk.Toplevel(self.root)
+        self.getting_started_window.title("Getting Started")
+        self.getting_started_window.geometry("760x360")
+        self.getting_started_window.transient(self.root)
+
+        def _cleanup():
+            if self.getting_started_window and self.getting_started_window.winfo_exists():
+                self.getting_started_window.destroy()
+            self.getting_started_window = None
+
+        self.getting_started_window.protocol("WM_DELETE_WINDOW", _cleanup)
+
+        container = tk.Frame(self.getting_started_window)
+        container.pack(fill="both", expand=True, padx=12, pady=12)
+
+        tk.Label(
+            container,
+            text=self.getting_started_text,
+            wraplength=720,
+            justify="left"
+        ).pack(fill="x", pady=(0, 12))
+
+        tk.Button(
+            container,
+            text="Close",
+            command=_cleanup,
+            bg="#e0e0e0"
+        ).pack(anchor="e")
+
+    def _maybe_show_getting_started(self) -> None:
+        """Show the getting started popup once if enabled."""
+        if not self.show_getting_started.get():
+            return
+
+        self.open_getting_started_window()
+        self.show_getting_started.set(False)
+        self.schedule_save()
 
     # ------------------------------------------------------------------
     # Options UI
@@ -4845,7 +4877,7 @@ class iRacingControlApp:
         if restart_car and restart_track:
             self._rescan_restart_pair = (restart_car, restart_track)
         self.pending_scan_on_start = True
-        mark_pending_scan()
+        mark_pending_scan(silent=True)
         self.save_config()
         restart_program()
 
@@ -5352,7 +5384,7 @@ class iRacingControlApp:
             if track in self.saved_presets[car]:
                 self.load_specific_preset(car, track)
 
-    def scan_driver_controls(self):
+    def scan_driver_controls(self, *, silent_if_unavailable: bool = False):
         """Scan for dc* driver control variables in current car."""
         if self.auto_restart_on_rescan.get() and self.scans_since_restart >= 1:
             detected_car, detected_track = self._detect_current_car_track()
@@ -5400,10 +5432,11 @@ class iRacingControlApp:
 
             # Always try to connect
             if not self.ir.startup():
-                messagebox.showerror(
-                    "Error",
-                    "Open iRacing (or enter a session)."
-                )
+                if not silent_if_unavailable:
+                    messagebox.showerror(
+                        "Error",
+                        "Open iRacing (or enter a session)."
+                    )
                 return
 
         found_vars = []
@@ -5855,16 +5888,23 @@ class iRacingControlApp:
 
     def _perform_pending_scan(self):
         """Execute a deferred scan request set before restarting."""
-        if consume_pending_scan():
+        pending_scan, silent_scan = consume_pending_scan()
+        if pending_scan:
             self.pending_scan_on_start = True
             self.skip_session_scan_once = True
             self.skip_auto_scan_once = True
+            self._pending_scan_silent = silent_scan
 
         if self.pending_scan_on_start:
             self.skip_race_restart_once = True
             self.pending_scan_on_start = False
             self.save_config()
-            self.root.after(50, self.scan_driver_controls)
+            self.root.after(
+                50,
+                lambda: self.scan_driver_controls(
+                    silent_if_unavailable=self._pending_scan_silent
+                )
+            )
 
     def _detect_current_car_track(self) -> Tuple[str, str]:
         """Detect current car/track names from the iRacing SDK, if available."""
@@ -5961,6 +6001,7 @@ class iRacingControlApp:
             "start_with_windows": self.start_with_windows.get(),
             "keep_trying_targets": self.keep_trying_targets.get(),
             "show_scan_popup": self.show_scan_popup.get(),
+            "show_getting_started": self.show_getting_started.get(),
             "clear_target_bind": self.clear_target_bind,
             "manual_rescan_bind": self.manual_rescan_bind,
             "pending_scan_on_start": self.pending_scan_on_start,
@@ -6022,6 +6063,7 @@ class iRacingControlApp:
         self.start_with_windows.set(data.get("start_with_windows", False))
         self.keep_trying_targets.set(data.get("keep_trying_targets", True))
         self.show_scan_popup.set(data.get("show_scan_popup", False))
+        self.show_getting_started.set(data.get("show_getting_started", True))
         self.clear_target_bind = data.get("clear_target_bind")
         self.manual_rescan_bind = data.get("manual_rescan_bind")
         self.pending_scan_on_start = data.get("pending_scan_on_start", False)

@@ -4003,6 +4003,23 @@ class iRacingControlApp:
         style.configure("TRadiobutton", font=base_font, padding=(6, 2))
         style.configure("TNotebook.Tab", font=heading_font, padding=(10, 6))
         style.configure("TCombobox", padding=4)
+        style.map(
+            "TCombobox",
+            fieldbackground=[("disabled", "#e4e4e4")],
+            foreground=[("disabled", "#7a7a7a")],
+        )
+        style.configure(
+            "PresetLoad.TButton",
+            font=button_font,
+            padding=(10, 6),
+            background="#e0e0e0",
+            foreground="#000000",
+        )
+        style.map(
+            "PresetLoad.TButton",
+            background=[("disabled", "#c8c8c8"), ("!disabled", "#e0e0e0")],
+            foreground=[("disabled", "#7a7a7a"), ("!disabled", "#000000")],
+        )
 
     def _create_main_ui(self):
         """Create main user interface."""
@@ -4082,11 +4099,11 @@ class iRacingControlApp:
         actions_frame = tk.Frame(presets_frame)
         actions_frame.pack(fill="x", padx=5, pady=5)
 
-        self.btn_load_preset = tk.Button(
+        self.btn_load_preset = ttk.Button(
             actions_frame,
             text="Load",
             command=self.action_load_preset,
-            bg="#e0e0e0"
+            style="PresetLoad.TButton"
         )
         self.btn_load_preset.pack(side="left", expand=True, fill="x", padx=2)
 

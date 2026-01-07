@@ -5386,52 +5386,55 @@ class iRacingControlApp:
 
     def scan_driver_controls(self, *, silent_if_unavailable: bool = False):
         """Scan for dc* driver control variables in current car."""
-        if self.auto_restart_on_rescan.get() and self.scans_since_restart >= 1:
-            detected_car, detected_track = self._detect_current_car_track()
-            restart_car = (
-                detected_car
-                or self.combo_car.get().strip()
-                or self.current_car
-            ).strip()
-            restart_track = (
-                detected_track
-                or self.combo_track.get().strip()
-                or self.current_track
-            ).strip()
-            restart_pair = (restart_car, restart_track)
-            detected_pair = (detected_car, detected_track)
-            suppress_restart = (
-                detected_car
-                and detected_track
-                and detected_pair == self._rescan_restart_pair
-            )
-            if not suppress_restart:
-                self.pending_scan_on_start = True
-                if restart_car and restart_track:
-                    self._rescan_restart_pair = restart_pair
-                mark_pending_scan()
-                self.save_config()
-                restart_program()
-                return
+        try:
+            if self.auto_restart_on_rescan.get() and self.scans_since_restart >= 1:
+                detected_car, detected_track = self._detect_current_car_track()
+                restart_car = (
+                    detected_car
+                    or self.combo_car.get().strip()
+                    or self.current_car
+                ).strip()
+                restart_track = (
+                    detected_track
+                    or self.combo_track.get().strip()
+                    or self.current_track
+                ).strip()
+                restart_pair = (restart_car, restart_track)
+                detected_pair = (detected_car, detected_track)
+                suppress_restart = (
+                    detected_car
+                    and detected_track
+                    and detected_pair == self._rescan_restart_pair
+                )
+                if not suppress_restart:
+                    self.pending_scan_on_start = True
+                    if restart_car and restart_track:
+                        self._rescan_restart_pair = restart_pair
+                    mark_pending_scan()
+                    self.save_config()
+                    restart_program()
+                    return
 
-        # Preserve any inline (unsaved) bindings so rescans in the same
-        # car/track session don't drop macros/hotkeys
-        previous_pair = (self.current_car, self.current_track)
-        fallback_tabs = {k: v.get_config() for k, v in self.tabs.items()}
-        fallback_combo = self.combo_tab.get_config() if self.combo_tab else {}
+            # Preserve any inline (unsaved) bindings so rescans in the same
+            # car/track session don't drop macros/hotkeys
+            previous_pair = (self.current_car, self.current_track)
+            fallback_tabs = {k: v.get_config() for k, v in self.tabs.items()}
+            fallback_combo = self.combo_tab.get_config() if self.combo_tab else {}
 
-        with self.ir_lock:
-            # Recreate SDK handle to avoid stale sessions between reconnects
-            try:
-                self.ir.shutdown()
-            except Exception:
-                pass
+            with self.ir_lock:
+                # Recreate SDK handle to avoid stale sessions between reconnects
+                try:
+                    self.ir.shutdown()
+                except Exception:
+                    pass
 
-            self.ir = irsdk.IRSDK()
-            self._refresh_controller_ir()
+                self.ir = irsdk.IRSDK()
+                self._refresh_controller_ir()
 
-            # Always try to connect
-            if not self.ir.startup():
+                # Always try to connect
+                startup_ok = self.ir.startup()
+
+            if not startup_ok:
                 if not silent_if_unavailable:
                     messagebox.showerror(
                         "Error",
@@ -5439,165 +5442,174 @@ class iRacingControlApp:
                     )
                 return
 
-        found_vars = []
+            found_vars = []
 
-        # Base candidates
-        candidates = [
-            "dcBrakeBias",
-            "dcFuelMixture",
-            "dcTractionControl",
-            "dcTractionControl2",
-            "dcABS",
-            "dcAntiRollFront",
-            "dcAntiRollRear",
-            "dcWeightJackerRight",
-            "dcDiffEntry",
-            "dcDiffExit"
-        ]
+            # Base candidates
+            candidates = [
+                "dcBrakeBias",
+                "dcFuelMixture",
+                "dcTractionControl",
+                "dcTractionControl2",
+                "dcABS",
+                "dcAntiRollFront",
+                "dcAntiRollRear",
+                "dcWeightJackerRight",
+                "dcDiffEntry",
+                "dcDiffExit"
+            ]
 
-        # Try to add all dc* variables from SDK
-        try:
-            if hasattr(self.ir, "var_headers_dict") and self.ir.var_headers_dict:
-                for key in self.ir.var_headers_dict.keys():
-                    if key.startswith("dc"):
-                        candidates.append(key)
-            elif hasattr(self.ir, "var_headers_names"):
-                names = getattr(self.ir, "var_headers_names", None)
-                if names:
-                    for key in names:
+            # Try to add all dc* variables from SDK
+            try:
+                if hasattr(self.ir, "var_headers_dict") and self.ir.var_headers_dict:
+                    for key in self.ir.var_headers_dict.keys():
                         if key.startswith("dc"):
                             candidates.append(key)
-        except Exception:
-            pass
+                elif hasattr(self.ir, "var_headers_names"):
+                    names = getattr(self.ir, "var_headers_names", None)
+                    if names:
+                        for key in names:
+                            if key.startswith("dc"):
+                                candidates.append(key)
+            except Exception:
+                pass
 
-        # Remove duplicates and sort
-        candidates = sorted(list(set(candidates)))
+            # Remove duplicates and sort
+            candidates = sorted(list(set(candidates)))
 
-        if not candidates:
-            messagebox.showwarning(
-                "Scan",
-                "SDK hasn't returned any variables yet.\n"
-                "Enter the car (Drive), adjust controls, and try again."
-            )
-            return
-
-        # Test each candidate
-        try:
-            for candidate in candidates:
-                try:
-                    value = self.ir[candidate]
-                except Exception:
-                    continue
-
-                if value is None:
-                    continue
-
-                # Skip non-numeric/bool entries
-                if isinstance(value, bool):
-                    continue
-                if not isinstance(value, numbers.Real):
-                    continue
-
-                is_float = (float(value) % 1.0) != 0.0
-                found_vars.append((candidate, is_float))
-
-        except Exception as e:
-            print(f"[Scan] Error reading variables: {e}")
-
-        if not found_vars:
-            messagebox.showwarning(
-                "Scan",
-                "No numeric 'dc*' variables found.\n"
-                "The car may not have driver controls or you're not in Drive mode."
-            )
-            return
-
-        # Clean and sort
-        seen = set()
-        clean_vars = []
-        for name, is_float in found_vars:
-            if name in seen:
-                continue
-            seen.add(name)
-            clean_vars.append((name, is_float))
-
-        clean_vars.sort(key=lambda x: x[0])
-
-        # Update active variables and rebuild tabs
-        self.active_vars = clean_vars
-        self.rebuild_tabs(self.active_vars)
-
-        # Update preset for current car/track
-        detected_car, detected_track = self._detect_current_car_track()
-        car = (
-            detected_car
-            or self.combo_car.get().strip()
-            or self.current_car
-            or "Generic Car"
-        )
-        track = (
-            detected_track
-            or self.combo_track.get().strip()
-            or self.current_track
-            or "Generic Track"
-        )
-
-        self.current_car, self.current_track = car, track
-        self.auto_fill_ui(car, track)
-
-        if car not in self.saved_presets:
-            self.saved_presets[car] = {}
-
-        if track not in self.saved_presets[car]:
-            self.saved_presets[car][track] = {
-                "active_vars": self.active_vars,
-                "tabs": {},
-                "combo": {}
-            }
-        else:
-            self.saved_presets[car][track]["active_vars"] = self.active_vars
-
-        # Overlay config
-        if "_overlay" not in self.saved_presets[car]:
-            self.saved_presets[car]["_overlay"] = \
-                self.car_overlay_config.get(car, {})
-
-        if "_overlay_feedback" not in self.saved_presets[car]:
-            self.saved_presets[car]["_overlay_feedback"] = \
-                self.car_overlay_feedback.get(
-                    car, DEFAULT_OVERLAY_FEEDBACK.copy()
+            if not candidates:
+                messagebox.showwarning(
+                    "Scan",
+                    "SDK hasn't returned any variables yet.\n"
+                    "Enter the car (Drive), adjust controls, and try again."
                 )
+                return
 
-        self.car_overlay_config[car] = self.saved_presets[car]["_overlay"]
-        self.car_overlay_feedback[car] = self.saved_presets[car]["_overlay_feedback"]
-        self.overlay_tab.load_for_car(
-            car,
-            self.active_vars,
-            self.car_overlay_config[car]
-        )
+            # Test each candidate
+            try:
+                for candidate in candidates:
+                    try:
+                        value = self.ir[candidate]
+                    except Exception:
+                        continue
 
-        # Reload saved bindings/macros for this car/track so they remain active
-        preset_data = self.saved_presets[car][track]
-        if preset_data.get("tabs") or preset_data.get("combo"):
-            # Load preset will rebuild tabs with configs and re-register listeners
-            self.load_specific_preset(car, track)
-        else:
-            # Even without saved presets, ensure any current bindings stay active.
-            # If this rescan is for the same car/track, reuse inline config.
-            if (car, track) == previous_pair:
-                self._apply_inline_config(fallback_tabs, fallback_combo)
-            self.register_current_listeners()
+                    if value is None:
+                        continue
 
-        self.update_preset_ui()
-        self.save_config()
+                    # Skip non-numeric/bool entries
+                    if isinstance(value, bool):
+                        continue
+                    if not isinstance(value, numbers.Real):
+                        continue
 
-        self.scans_since_restart += 1
+                    is_float = (float(value) % 1.0) != 0.0
+                    found_vars.append((candidate, is_float))
 
-        if self.show_scan_popup.get():
-            messagebox.showinfo(
-                "Scan",
-                f"{len(clean_vars)} 'dc' controls configured for this car."
+            except Exception as e:
+                print(f"[Scan] Error reading variables: {e}")
+
+            if not found_vars:
+                messagebox.showwarning(
+                    "Scan",
+                    "No numeric 'dc*' variables found.\n"
+                    "The car may not have driver controls or you're not in Drive mode."
+                )
+                return
+
+            # Clean and sort
+            seen = set()
+            clean_vars = []
+            for name, is_float in found_vars:
+                if name in seen:
+                    continue
+                seen.add(name)
+                clean_vars.append((name, is_float))
+
+            clean_vars.sort(key=lambda x: x[0])
+
+            # Update active variables and rebuild tabs
+            self.active_vars = clean_vars
+            self.rebuild_tabs(self.active_vars)
+
+            # Update preset for current car/track
+            detected_car, detected_track = self._detect_current_car_track()
+            car = (
+                detected_car
+                or self.combo_car.get().strip()
+                or self.current_car
+                or "Generic Car"
             )
+            track = (
+                detected_track
+                or self.combo_track.get().strip()
+                or self.current_track
+                or "Generic Track"
+            )
+
+            self.current_car, self.current_track = car, track
+            self.auto_fill_ui(car, track)
+
+            if car not in self.saved_presets:
+                self.saved_presets[car] = {}
+
+            if track not in self.saved_presets[car]:
+                self.saved_presets[car][track] = {
+                    "active_vars": self.active_vars,
+                    "tabs": {},
+                    "combo": {}
+                }
+            else:
+                self.saved_presets[car][track]["active_vars"] = self.active_vars
+
+            # Overlay config
+            if "_overlay" not in self.saved_presets[car]:
+                self.saved_presets[car]["_overlay"] = \
+                    self.car_overlay_config.get(car, {})
+
+            if "_overlay_feedback" not in self.saved_presets[car]:
+                self.saved_presets[car]["_overlay_feedback"] = \
+                    self.car_overlay_feedback.get(
+                        car, DEFAULT_OVERLAY_FEEDBACK.copy()
+                    )
+
+            self.car_overlay_config[car] = self.saved_presets[car]["_overlay"]
+            self.car_overlay_feedback[car] = self.saved_presets[car][
+                "_overlay_feedback"
+            ]
+            self.overlay_tab.load_for_car(
+                car,
+                self.active_vars,
+                self.car_overlay_config[car]
+            )
+
+            # Reload saved bindings/macros for this car/track so they remain active
+            preset_data = self.saved_presets[car][track]
+            if preset_data.get("tabs") or preset_data.get("combo"):
+                # Load preset will rebuild tabs with configs and re-register listeners
+                self.load_specific_preset(car, track)
+            else:
+                # Even without saved presets, ensure any current bindings stay active.
+                # If this rescan is for the same car/track, reuse inline config.
+                if (car, track) == previous_pair:
+                    self._apply_inline_config(fallback_tabs, fallback_combo)
+                self.register_current_listeners()
+
+            self.update_preset_ui()
+            self.save_config()
+
+            self.scans_since_restart += 1
+
+            if self.show_scan_popup.get():
+                messagebox.showinfo(
+                    "Scan",
+                    f"{len(clean_vars)} 'dc' controls configured for this car."
+                )
+        except Exception as exc:
+            print(f"[Scan] Unexpected error: {exc}")
+            if not silent_if_unavailable:
+                messagebox.showerror(
+                    "Scan",
+                    "Scanning failed. Please try again once you're in session."
+                )
 
     def rebuild_tabs(self, vars_list: List[Tuple[str, bool]]):
         """Rebuild control tabs with new variable list."""

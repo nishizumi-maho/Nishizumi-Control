@@ -268,7 +268,7 @@ DEFAULT_OVERLAY_FEEDBACK = {
 
 # Timing profiles for input simulation (click-click timing)
 GLOBAL_TIMING = {
-    "profile": "aggressive",  # "aggressive", "casual", "relaxed", "custom", "bot"
+    "profile": "aggressive",  # "aggressive", "casual", "relaxed", "custom", "bot", "bot_safe"
     # Custom profile settings:
     "press_min_ms": 60,
     "press_max_ms": 80,
@@ -509,7 +509,7 @@ def _normalize_timing_config(timing: Dict[str, Any]) -> Dict[str, Any]:
 
     normalized.update(timing)
 
-    allowed_profiles = {"aggressive", "casual", "relaxed", "custom", "bot"}
+    allowed_profiles = {"aggressive", "casual", "relaxed", "custom", "bot", "bot_safe"}
     if normalized.get("profile") not in allowed_profiles:
         normalized["profile"] = "aggressive"
 
@@ -555,6 +555,9 @@ def _compute_timing(is_float: bool = False) -> Tuple[float, float]:
     elif profile == "bot":
         press_ms = 1
         interval_ms = 1
+    elif profile == "bot_safe":
+        press_ms = 12
+        interval_ms = 6
     else:  # custom
         p_min = timing_cfg.get("press_min_ms", 60)
         p_max = timing_cfg.get("press_max_ms", 80)
@@ -568,8 +571,13 @@ def _compute_timing(is_float: bool = False) -> Tuple[float, float]:
             press_ms += random.uniform(-rng, rng)
             interval_ms += random.uniform(-rng, rng)
 
-    # Ensure minimum values, allowing extremely low latency for bot mode
-    min_value = 1 if profile == "bot" else 10
+    # Ensure minimum values, allowing extremely low latency for bot modes
+    if profile == "bot":
+        min_value = 1
+    elif profile == "bot_safe":
+        min_value = 5
+    else:
+        min_value = 10
     press_ms = max(min_value, press_ms)
     interval_ms = max(min_value, interval_ms)
 
@@ -2483,7 +2491,8 @@ class GenericController:
         success = False
         last_diff: Optional[float] = None
         timing_profile = _normalize_timing_config(GLOBAL_TIMING).get("profile", "aggressive")
-        is_bot_profile = timing_profile == "bot"
+        is_bot_profile = timing_profile in {"bot", "bot_safe"}
+        is_bot_safe = timing_profile == "bot_safe"
 
         try:
             while True:
@@ -2567,14 +2576,18 @@ class GenericController:
 
                     close_threshold = max(0.001, base_step)
                     if abs_diff <= close_threshold * 2 or overshot:
-                        _direct_pulse(key, press_ms=5, interval_ms=5)
-                        time.sleep(0.05)
+                        if is_bot_safe:
+                            _direct_pulse(key, press_ms=8, interval_ms=10)
+                            time.sleep(0.07)
+                        else:
+                            _direct_pulse(key, press_ms=5, interval_ms=5)
+                            time.sleep(0.05)
                     else:
                         click_pulse(key, self.is_float)
                         if abs_diff <= close_threshold * 4:
                             time.sleep(0.03)
                         else:
-                            time.sleep(0.02)
+                            time.sleep(0.025 if is_bot_safe else 0.02)
                 else:
                     click_pulse(key, self.is_float)
                     time.sleep(0.02)
@@ -3495,6 +3508,14 @@ class GlobalTimingWindow(tk.Toplevel):
             text="🤖 BOT (experimental, near-zero delay)",
             variable=self.var_profile,
             value="bot",
+            command=self._on_profile_change
+        ).pack(anchor="w", padx=5, pady=2)
+
+        tk.Radiobutton(
+            profiles_frame,
+            text="🤖 BOT Stable (fast, more reliable)",
+            variable=self.var_profile,
+            value="bot_safe",
             command=self._on_profile_change
         ).pack(anchor="w", padx=5, pady=2)
 

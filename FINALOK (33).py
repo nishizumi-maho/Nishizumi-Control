@@ -3108,6 +3108,18 @@ class ComboTab(tk.Frame):
         self.controllers = controllers_dict
         self.var_names = list(self.controllers.keys())
         self.preset_rows: List[Dict[str, Any]] = []
+        if self.var_names:
+            self.column_width = max(
+                8,
+                min(
+                    18,
+                    max(
+                        len(name.replace("dc", "")) for name in self.var_names
+                    ) + 2
+                )
+            )
+        else:
+            self.column_width = 8
 
         scroll_frame = ScrollableFrame(self)
         scroll_frame.pack(fill="both", expand=True)
@@ -3136,7 +3148,8 @@ class ComboTab(tk.Frame):
             tk.Label(
                 header,
                 text=var_name.replace("dc", ""),
-                width=8,
+                width=self.column_width,
+                anchor="w",
                 font=("Arial", 8)
             ).pack(side="left", padx=2)
 
@@ -3271,26 +3284,12 @@ class ComboTab(tk.Frame):
 
         # Create entry for each variable
         for var_name in self.var_names:
-            entry = ttk.Entry(frame, width=8)
+            entry = ttk.Entry(frame, width=self.column_width)
             entry.pack(side="left", padx=2)
             if self.app.app_state != "CONFIG":
                 entry.config(state="readonly")
             row_data["entries"][var_name] = entry
             self._bind_autosave_entry(entry)
-
-        # Delete button (except for RESET)
-        if not is_reset:
-            delete_button = tk.Button(
-                frame,
-                text="X",
-                fg="red",
-                command=lambda r=row_data: self.remove_row(r),
-                width=2
-            )
-            delete_button.pack(side="left", padx=5)
-            if self.app.app_state != "CONFIG":
-                delete_button.config(state="disabled")
-            row_data["delete_button"] = delete_button
 
         # Load existing data if provided
         if existing:
@@ -3318,6 +3317,20 @@ class ComboTab(tk.Frame):
             voice_entry.config(state="readonly")
         row_data["voice_entry"] = voice_entry
         self._bind_autosave_entry(voice_entry)
+
+        # Delete button (except for RESET)
+        if not is_reset:
+            delete_button = tk.Button(
+                frame,
+                text="X",
+                fg="red",
+                command=lambda r=row_data: self.remove_row(r),
+                width=2
+            )
+            delete_button.pack(side="left", padx=5)
+            if self.app.app_state != "CONFIG":
+                delete_button.config(state="disabled")
+            row_data["delete_button"] = delete_button
 
         self.preset_rows.append(row_data)
 
@@ -3990,6 +4003,14 @@ class iRacingControlApp:
         )
         devices_frame.pack(fill="x", pady=(0, 8))
 
+        self.check_safe = tk.Checkbutton(
+            devices_frame,
+            text="Keyboard Only Mode (requires restart)",
+            variable=self.use_keyboard_only,
+            command=self.trigger_safe_mode_update
+        )
+        self.check_safe.pack(anchor="w", padx=8, pady=(6, 2))
+
         tk.Button(
             devices_frame,
             text="🎮 Manage Devices",
@@ -4071,14 +4092,6 @@ class iRacingControlApp:
             command=self.schedule_save
         ).pack(anchor="w", padx=8, pady=2)
 
-        self.check_safe = tk.Checkbutton(
-            general_left,
-            text="Keyboard Only Mode (requires restart)",
-            variable=self.use_keyboard_only,
-            command=self.trigger_safe_mode_update
-        )
-        self.check_safe.pack(anchor="w", padx=8, pady=(2, 8))
-
         stability_frame = tk.LabelFrame(
             general_container,
             text="Automation & Shortcuts"
@@ -4087,9 +4100,15 @@ class iRacingControlApp:
 
         tk.Button(
             stability_frame,
+            text="Timing Adjustments",
+            command=self.open_timing_window
+        ).pack(fill="x", padx=8, pady=(8, 6))
+
+        tk.Button(
+            stability_frame,
             text="Voice/Audio Options",
             command=self.open_voice_audio_settings
-        ).pack(fill="x", padx=8, pady=(8, 6))
+        ).pack(fill="x", padx=8, pady=(0, 6))
 
         tk.Checkbutton(
             stability_frame,

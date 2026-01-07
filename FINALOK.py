@@ -3775,6 +3775,8 @@ class iRacingControlApp:
         self._last_weekend_key: Optional[Tuple[Any, ...]] = None
         self._skip_next_auto_load = False
         self._pending_scan_silent = False
+        self._scan_in_progress = False
+        self._session_scan_debounce_ms = 250
 
         # Auto-load tracking
         self.auto_load_attempted: set = set()
@@ -5359,6 +5361,29 @@ class iRacingControlApp:
         if self.auto_scan_on_change.get() or self.auto_restart_on_rescan.get():
             self._schedule_session_scan()
 
+    def _telemetry_ready_for_scan(self) -> bool:
+        """Return True when telemetry data is stable enough to scan."""
+        try:
+            if not getattr(self.ir, "is_initialized", False):
+                return False
+            if getattr(self.ir, "is_connected", True) is False:
+                return False
+            with self.ir_lock:
+                driver_info = self.ir["DriverInfo"]
+                weekend = self.ir["WeekendInfo"]
+                session_info = self.ir["SessionInfo"]
+        except Exception:
+            return False
+
+        if not driver_info or not weekend or not session_info:
+            return False
+
+        sessions = session_info.get("Sessions") if session_info else None
+        if not sessions:
+            return False
+
+        return True
+
     def _schedule_session_scan(self) -> None:
         """Schedule a rescan and preset reload for a session change."""
         if self._session_scan_pending:
@@ -5368,25 +5393,66 @@ class iRacingControlApp:
             self.skip_auto_scan_once = False
             return
 
+        if self._scan_in_progress:
+            self._session_scan_pending = True
+            self._skip_next_auto_load = True
+            self.root.after(
+                self._session_scan_debounce_ms,
+                self._auto_scan_and_load_preset
+            )
+            return
+
         self._session_scan_pending = True
         self._skip_next_auto_load = True
-        self.root.after(200, self._auto_scan_and_load_preset)
+        self.root.after(
+            self._session_scan_debounce_ms,
+            self._auto_scan_and_load_preset
+        )
 
     def _auto_scan_and_load_preset(self) -> None:
         """Scan controls and then reload the current car/track preset."""
+        if not self._session_scan_pending:
+            return
+
+        if self._scan_in_progress:
+            self.root.after(
+                self._session_scan_debounce_ms,
+                self._auto_scan_and_load_preset
+            )
+            return
+
+        if not self._telemetry_ready_for_scan():
+            self.root.after(
+                self._session_scan_debounce_ms,
+                self._auto_scan_and_load_preset
+            )
+            return
+
         self._session_scan_pending = False
         self._skip_next_auto_load = False
-        self.scan_driver_controls()
 
-        car = (self.combo_car.get().strip() or self.current_car).strip()
-        track = (self.combo_track.get().strip() or self.current_track).strip()
-        if car and track and car in self.saved_presets:
-            if track in self.saved_presets[car]:
-                self.load_specific_preset(car, track)
+        def _finish_auto_load() -> None:
+            car = (self.combo_car.get().strip() or self.current_car).strip()
+            track = (self.combo_track.get().strip() or self.current_track).strip()
+            if car and track and car in self.saved_presets:
+                if track in self.saved_presets[car]:
+                    self.load_specific_preset(car, track)
 
-    def scan_driver_controls(self, *, silent_if_unavailable: bool = False):
+        self.scan_driver_controls(on_complete=_finish_auto_load)
+
+    def scan_driver_controls(
+        self,
+        *,
+        silent_if_unavailable: bool = False,
+        on_complete: Optional[Callable[[], None]] = None
+    ):
         """Scan for dc* driver control variables in current car."""
         try:
+            if self._scan_in_progress:
+                if on_complete:
+                    self.root.after(0, on_complete)
+                return
+
             if self.auto_restart_on_rescan.get() and self.scans_since_restart >= 1:
                 detected_car, detected_track = self._detect_current_car_track()
                 restart_car = (
@@ -5413,6 +5479,8 @@ class iRacingControlApp:
                     mark_pending_scan()
                     self.save_config()
                     restart_program()
+                    if on_complete:
+                        self.root.after(0, on_complete)
                     return
 
             # Preserve any inline (unsaved) bindings so rescans in the same
@@ -5421,6 +5489,37 @@ class iRacingControlApp:
             fallback_tabs = {k: v.get_config() for k, v in self.tabs.items()}
             fallback_combo = self.combo_tab.get_config() if self.combo_tab else {}
 
+            self._scan_in_progress = True
+
+            def _worker():
+                result = self._scan_driver_controls_worker()
+                self.root.after(
+                    0,
+                    lambda: self._finish_scan_driver_controls(
+                        result,
+                        previous_pair,
+                        fallback_tabs,
+                        fallback_combo,
+                        silent_if_unavailable,
+                        on_complete
+                    )
+                )
+
+            threading.Thread(target=_worker, daemon=True).start()
+        except Exception as exc:
+            print(f"[Scan] Unexpected error: {exc}")
+            if not silent_if_unavailable:
+                messagebox.showerror(
+                    "Scan",
+                    "Scanning failed. Please try again once you're in session."
+                )
+            if on_complete:
+                self.root.after(0, on_complete)
+            self._scan_in_progress = False
+
+    def _scan_driver_controls_worker(self) -> Dict[str, Any]:
+        """Worker thread for driver control scanning."""
+        try:
             with self.ir_lock:
                 # Recreate SDK handle to avoid stale sessions between reconnects
                 try:
@@ -5429,18 +5528,12 @@ class iRacingControlApp:
                     pass
 
                 self.ir = irsdk.IRSDK()
-                self._refresh_controller_ir()
 
                 # Always try to connect
                 startup_ok = self.ir.startup()
 
             if not startup_ok:
-                if not silent_if_unavailable:
-                    messagebox.showerror(
-                        "Error",
-                        "Open iRacing (or enter a session)."
-                    )
-                return
+                return {"status": "unavailable"}
 
             found_vars = []
 
@@ -5477,12 +5570,7 @@ class iRacingControlApp:
             candidates = sorted(list(set(candidates)))
 
             if not candidates:
-                messagebox.showwarning(
-                    "Scan",
-                    "SDK hasn't returned any variables yet.\n"
-                    "Enter the car (Drive), adjust controls, and try again."
-                )
-                return
+                return {"status": "no_candidates"}
 
             # Test each candidate
             try:
@@ -5508,12 +5596,7 @@ class iRacingControlApp:
                 print(f"[Scan] Error reading variables: {e}")
 
             if not found_vars:
-                messagebox.showwarning(
-                    "Scan",
-                    "No numeric 'dc*' variables found.\n"
-                    "The car may not have driver controls or you're not in Drive mode."
-                )
-                return
+                return {"status": "no_vars"}
 
             # Clean and sort
             seen = set()
@@ -5526,90 +5609,155 @@ class iRacingControlApp:
 
             clean_vars.sort(key=lambda x: x[0])
 
-            # Update active variables and rebuild tabs
-            self.active_vars = clean_vars
-            self.rebuild_tabs(self.active_vars)
-
-            # Update preset for current car/track
             detected_car, detected_track = self._detect_current_car_track()
-            car = (
-                detected_car
-                or self.combo_car.get().strip()
-                or self.current_car
-                or "Generic Car"
-            )
-            track = (
-                detected_track
-                or self.combo_track.get().strip()
-                or self.current_track
-                or "Generic Track"
-            )
 
-            self.current_car, self.current_track = car, track
-            self.auto_fill_ui(car, track)
-
-            if car not in self.saved_presets:
-                self.saved_presets[car] = {}
-
-            if track not in self.saved_presets[car]:
-                self.saved_presets[car][track] = {
-                    "active_vars": self.active_vars,
-                    "tabs": {},
-                    "combo": {}
-                }
-            else:
-                self.saved_presets[car][track]["active_vars"] = self.active_vars
-
-            # Overlay config
-            if "_overlay" not in self.saved_presets[car]:
-                self.saved_presets[car]["_overlay"] = \
-                    self.car_overlay_config.get(car, {})
-
-            if "_overlay_feedback" not in self.saved_presets[car]:
-                self.saved_presets[car]["_overlay_feedback"] = \
-                    self.car_overlay_feedback.get(
-                        car, DEFAULT_OVERLAY_FEEDBACK.copy()
-                    )
-
-            self.car_overlay_config[car] = self.saved_presets[car]["_overlay"]
-            self.car_overlay_feedback[car] = self.saved_presets[car][
-                "_overlay_feedback"
-            ]
-            self.overlay_tab.load_for_car(
-                car,
-                self.active_vars,
-                self.car_overlay_config[car]
-            )
-
-            # Reload saved bindings/macros for this car/track so they remain active
-            preset_data = self.saved_presets[car][track]
-            if preset_data.get("tabs") or preset_data.get("combo"):
-                # Load preset will rebuild tabs with configs and re-register listeners
-                self.load_specific_preset(car, track)
-            else:
-                # Even without saved presets, ensure any current bindings stay active.
-                # If this rescan is for the same car/track, reuse inline config.
-                if (car, track) == previous_pair:
-                    self._apply_inline_config(fallback_tabs, fallback_combo)
-                self.register_current_listeners()
-
-            self.update_preset_ui()
-            self.save_config()
-
-            self.scans_since_restart += 1
-
-            if self.show_scan_popup.get():
-                messagebox.showinfo(
-                    "Scan",
-                    f"{len(clean_vars)} 'dc' controls configured for this car."
-                )
+            return {
+                "status": "ok",
+                "vars": clean_vars,
+                "detected_car": detected_car,
+                "detected_track": detected_track
+            }
         except Exception as exc:
-            print(f"[Scan] Unexpected error: {exc}")
+            return {"status": "error", "error": exc}
+
+    def _finish_scan_driver_controls(
+        self,
+        result: Dict[str, Any],
+        previous_pair: Tuple[str, str],
+        fallback_tabs: Dict[str, Dict[str, Any]],
+        fallback_combo: Dict[str, Any],
+        silent_if_unavailable: bool,
+        on_complete: Optional[Callable[[], None]]
+    ) -> None:
+        """Finalize scan results on the main UI thread."""
+        self._scan_in_progress = False
+        status = result.get("status")
+
+        if status == "unavailable":
+            if not silent_if_unavailable:
+                messagebox.showerror(
+                    "Error",
+                    "Open iRacing (or enter a session)."
+                )
+            if on_complete:
+                on_complete()
+            return
+
+        if status == "no_candidates":
+            messagebox.showwarning(
+                "Scan",
+                "SDK hasn't returned any variables yet.\n"
+                "Enter the car (Drive), adjust controls, and try again."
+            )
+            if on_complete:
+                on_complete()
+            return
+
+        if status == "no_vars":
+            messagebox.showwarning(
+                "Scan",
+                "No numeric 'dc*' variables found.\n"
+                "The car may not have driver controls or you're not in Drive mode."
+            )
+            if on_complete:
+                on_complete()
+            return
+
+        if status != "ok":
+            print(f"[Scan] Unexpected error: {result.get('error')}")
             if not silent_if_unavailable:
                 messagebox.showerror(
                     "Scan",
                     "Scanning failed. Please try again once you're in session."
                 )
+            if on_complete:
+                on_complete()
+            return
+
+        clean_vars = result["vars"]
+
+        self._refresh_controller_ir()
+
+        # Update active variables and rebuild tabs
+        self.active_vars = clean_vars
+        self.rebuild_tabs(self.active_vars)
+
+        # Update preset for current car/track
+        detected_car = result.get("detected_car", "")
+        detected_track = result.get("detected_track", "")
+        car = (
+            detected_car
+            or self.combo_car.get().strip()
+            or self.current_car
+            or "Generic Car"
+        )
+        track = (
+            detected_track
+            or self.combo_track.get().strip()
+            or self.current_track
+            or "Generic Track"
+        )
+
+        self.current_car, self.current_track = car, track
+        self.auto_fill_ui(car, track)
+
+        if car not in self.saved_presets:
+            self.saved_presets[car] = {}
+
+        if track not in self.saved_presets[car]:
+            self.saved_presets[car][track] = {
+                "active_vars": self.active_vars,
+                "tabs": {},
+                "combo": {}
+            }
+        else:
+            self.saved_presets[car][track]["active_vars"] = self.active_vars
+
+        # Overlay config
+        if "_overlay" not in self.saved_presets[car]:
+            self.saved_presets[car]["_overlay"] = \
+                self.car_overlay_config.get(car, {})
+
+        if "_overlay_feedback" not in self.saved_presets[car]:
+            self.saved_presets[car]["_overlay_feedback"] = \
+                self.car_overlay_feedback.get(
+                    car, DEFAULT_OVERLAY_FEEDBACK.copy()
+                )
+
+        self.car_overlay_config[car] = self.saved_presets[car]["_overlay"]
+        self.car_overlay_feedback[car] = self.saved_presets[car][
+            "_overlay_feedback"
+        ]
+        self.overlay_tab.load_for_car(
+            car,
+            self.active_vars,
+            self.car_overlay_config[car]
+        )
+
+        # Reload saved bindings/macros for this car/track so they remain active
+        preset_data = self.saved_presets[car][track]
+        if preset_data.get("tabs") or preset_data.get("combo"):
+            # Load preset will rebuild tabs with configs and re-register listeners
+            self.load_specific_preset(car, track)
+        else:
+            # Even without saved presets, ensure any current bindings stay active.
+            # If this rescan is for the same car/track, reuse inline config.
+            if (car, track) == previous_pair:
+                self._apply_inline_config(fallback_tabs, fallback_combo)
+            self.register_current_listeners()
+
+        self.update_preset_ui()
+        self.save_config()
+
+        self.scans_since_restart += 1
+
+        if self.show_scan_popup.get():
+            messagebox.showinfo(
+                "Scan",
+                f"{len(clean_vars)} 'dc' controls configured for this car."
+            )
+        if on_complete:
+            on_complete()
 
     def rebuild_tabs(self, vars_list: List[Tuple[str, bool]]):
         """Rebuild control tabs with new variable list."""

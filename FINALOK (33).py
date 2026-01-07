@@ -3918,13 +3918,13 @@ class iRacingControlApp:
         main_tabs = ttk.Notebook(self.root)
         main_tabs.pack(fill="both", expand=True, padx=10, pady=5)
 
-        setup_tab = ttk.Frame(main_tabs)
-        controls_tab = ttk.Frame(main_tabs)
-        main_tabs.add(setup_tab, text="🛠 Setup")
-        main_tabs.add(controls_tab, text="🎮 Controls")
+        main_tab = ttk.Frame(main_tabs)
+        options_tab = ttk.Frame(main_tabs)
+        main_tabs.add(main_tab, text="🏁 Main")
+        main_tabs.add(options_tab, text="⚙️ Options")
 
-        setup_container = tk.Frame(setup_tab)
-        setup_container.pack(fill="both", expand=True, padx=5, pady=5)
+        setup_container = tk.Frame(main_tab)
+        setup_container.pack(fill="x", expand=False, padx=5, pady=(5, 2))
         setup_container.columnconfigure(0, weight=3)
         setup_container.columnconfigure(1, weight=2)
 
@@ -3935,6 +3935,7 @@ class iRacingControlApp:
         options_column = tk.Frame(setup_container)
         options_column.grid(row=0, column=1, sticky="nsew")
         options_column.columnconfigure(0, weight=1)
+        options_column.grid_remove()
 
         # Car/Track manager
         presets_frame = tk.LabelFrame(
@@ -3982,36 +3983,6 @@ class iRacingControlApp:
         )
         self.btn_delete_preset.pack(side="left", expand=True, fill="x", padx=2)
 
-        tk.Checkbutton(
-            presets_frame,
-            text="Auto-save preset edits (hotkeys/macros)",
-            variable=self.auto_save_presets,
-            command=self.schedule_save
-        ).pack(anchor="w", padx=5, pady=(0, 2))
-
-        tk.Checkbutton(
-            presets_frame,
-            text="Lock car/track selection (auto-managed)",
-            variable=self.lock_preset_selection,
-            command=self._on_lock_preset_selection_toggle
-        ).pack(anchor="w", padx=5, pady=(0, 2))
-
-        tk.Checkbutton(
-            presets_frame,
-            text="Auto-detect car/track via iRacing",
-            variable=self.auto_detect,
-            command=self.schedule_save
-        ).pack(anchor="w", padx=5, pady=(0, 2))
-
-        tk.Checkbutton(
-            presets_frame,
-            text="Auto-scan when car/track changes",
-            variable=self.auto_scan_on_change,
-            command=self.schedule_save
-        ).pack(anchor="w", padx=5, pady=(0, 5))
-
-        self._update_preset_lock_state()
-
         # Device management
         devices_frame = tk.LabelFrame(
             steps_column,
@@ -4019,29 +3990,13 @@ class iRacingControlApp:
         )
         devices_frame.pack(fill="x", pady=(0, 8))
 
-        devices_note = tk.Frame(devices_frame)
-        devices_note.pack(fill="x", padx=5, pady=(4, 0))
-        self.check_safe = tk.Checkbutton(
-            devices_note,
-            text="Keyboard Only Mode (requires restart)",
-            variable=self.use_keyboard_only,
-            command=self.trigger_safe_mode_update
-        )
-        self.check_safe.pack(side="left")
-
-        tk.Label(
-            devices_note,
-            text="(No joystick/wheel buttons)",
-            fg="gray",
-            font=("Arial", 8)
-        ).pack(side="left", padx=4)
-
         tk.Button(
             devices_frame,
             text="🎮 Manage Devices",
             command=self.open_device_manager,
             bg="#e0e0e0"
         ).pack(fill="x", padx=5, pady=5)
+        self._update_preset_lock_state()
 
         # Scan button
         scan_frame = tk.LabelFrame(
@@ -4065,11 +4020,70 @@ class iRacingControlApp:
             font=("Arial", 9)
         ).pack(fill="x", padx=8, pady=(0, 6))
 
+        controls_container = tk.Frame(main_tab)
+        controls_container.pack(fill="both", expand=True, padx=5, pady=(2, 5))
+
+        # Main notebook
+        self.notebook = ttk.Notebook(controls_container)
+        self.notebook.pack(fill="both", expand=True, padx=0, pady=0)
+
+        options_notebook = ttk.Notebook(options_tab)
+        options_notebook.pack(fill="both", expand=True, padx=5, pady=5)
+
+        general_tab = ttk.Frame(options_notebook)
+        options_notebook.add(general_tab, text="General Settings")
+
+        general_container = tk.Frame(general_tab)
+        general_container.pack(fill="both", expand=True, padx=5, pady=5)
+        general_container.columnconfigure(0, weight=1)
+
+        general_left = tk.LabelFrame(
+            general_container,
+            text="Presets & Devices"
+        )
+        general_left.grid(row=0, column=0, sticky="nsew", pady=(0, 8))
+
+        tk.Checkbutton(
+            general_left,
+            text="Auto-save preset edits (hotkeys/macros)",
+            variable=self.auto_save_presets,
+            command=self.schedule_save
+        ).pack(anchor="w", padx=8, pady=(8, 2))
+
+        tk.Checkbutton(
+            general_left,
+            text="Lock car/track selection (auto-managed)",
+            variable=self.lock_preset_selection,
+            command=self._on_lock_preset_selection_toggle
+        ).pack(anchor="w", padx=8, pady=2)
+
+        tk.Checkbutton(
+            general_left,
+            text="Auto-detect car/track via iRacing",
+            variable=self.auto_detect,
+            command=self.schedule_save
+        ).pack(anchor="w", padx=8, pady=2)
+
+        tk.Checkbutton(
+            general_left,
+            text="Auto-scan when car/track changes",
+            variable=self.auto_scan_on_change,
+            command=self.schedule_save
+        ).pack(anchor="w", padx=8, pady=2)
+
+        self.check_safe = tk.Checkbutton(
+            general_left,
+            text="Keyboard Only Mode (requires restart)",
+            variable=self.use_keyboard_only,
+            command=self.trigger_safe_mode_update
+        )
+        self.check_safe.pack(anchor="w", padx=8, pady=(2, 8))
+
         stability_frame = tk.LabelFrame(
-            options_column,
+            general_container,
             text="Automation & Shortcuts"
         )
-        stability_frame.pack(fill="both", expand=True)
+        stability_frame.grid(row=1, column=0, sticky="nsew")
 
         tk.Button(
             stability_frame,
@@ -4139,10 +4153,6 @@ class iRacingControlApp:
             command=self._set_manual_rescan_bind
         )
         self.btn_manual_rescan_bind.pack(side="left", padx=6)
-
-        # Main notebook
-        self.notebook = ttk.Notebook(controls_tab)
-        self.notebook.pack(fill="both", expand=True, padx=5, pady=5)
 
         # Initialize with default variables if none exist
         if not self.active_vars:

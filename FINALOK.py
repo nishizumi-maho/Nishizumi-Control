@@ -3659,6 +3659,7 @@ class iRacingControlApp:
         self.keep_trying_targets = tk.BooleanVar(value=True)
         self.show_scan_popup = tk.BooleanVar(value=False)
         self.auto_save_presets = tk.BooleanVar(value=True)
+        self.lock_preset_selection = tk.BooleanVar(value=False)
         self.start_with_windows = tk.BooleanVar(value=False)
         self.clear_target_bind: Optional[str] = None
         self.btn_clear_target_bind: Optional[tk.Button] = None
@@ -3992,26 +3993,29 @@ class iRacingControlApp:
         actions_frame = tk.Frame(presets_frame)
         actions_frame.pack(fill="x", padx=5, pady=5)
 
-        tk.Button(
+        self.btn_load_preset = tk.Button(
             actions_frame,
             text="Load",
             command=self.action_load_preset,
             bg="#e0e0e0"
-        ).pack(side="left", expand=True, fill="x", padx=2)
+        )
+        self.btn_load_preset.pack(side="left", expand=True, fill="x", padx=2)
 
-        tk.Button(
+        self.btn_save_preset = tk.Button(
             actions_frame,
             text="Save Current",
             command=self.action_save_preset,
             bg="#ADD8E6"
-        ).pack(side="left", expand=True, fill="x", padx=2)
+        )
+        self.btn_save_preset.pack(side="left", expand=True, fill="x", padx=2)
 
-        tk.Button(
+        self.btn_delete_preset = tk.Button(
             actions_frame,
             text="Delete",
             command=self.action_delete_preset,
             bg="#ffcccc"
-        ).pack(side="left", expand=True, fill="x", padx=2)
+        )
+        self.btn_delete_preset.pack(side="left", expand=True, fill="x", padx=2)
 
         tk.Checkbutton(
             presets_frame,
@@ -4019,6 +4023,15 @@ class iRacingControlApp:
             variable=self.auto_save_presets,
             command=self.schedule_save
         ).pack(anchor="w", padx=5, pady=(0, 5))
+
+        tk.Checkbutton(
+            presets_frame,
+            text="Lock car/track selection (auto-managed)",
+            variable=self.lock_preset_selection,
+            command=self._on_lock_preset_selection_toggle
+        ).pack(anchor="w", padx=5, pady=(0, 5))
+
+        self._update_preset_lock_state()
 
         # Device management
         devices_frame = tk.LabelFrame(
@@ -4582,6 +4595,24 @@ class iRacingControlApp:
         if self.current_car and self.current_car in cars:
             self.combo_car.set(self.current_car)
             self.on_car_selected(None)
+
+        self._update_preset_lock_state()
+
+    def _on_lock_preset_selection_toggle(self) -> None:
+        """Toggle manual preset selection lock."""
+        self._update_preset_lock_state()
+        self.schedule_save()
+
+    def _update_preset_lock_state(self) -> None:
+        """Enable or disable manual preset selection controls."""
+        locked = self.lock_preset_selection.get()
+        state = "disabled" if locked else "normal"
+        self.combo_car.configure(state=state)
+        self.combo_track.configure(state=state)
+        button_state = tk.DISABLED if locked else tk.NORMAL
+        self.btn_load_preset.configure(state=button_state)
+        self.btn_save_preset.configure(state=button_state)
+        self.btn_delete_preset.configure(state=button_state)
 
     def on_car_selected(self, _event):
         """Handle car selection."""
@@ -5630,6 +5661,7 @@ class iRacingControlApp:
             "auto_restart_on_rescan": self.auto_restart_on_rescan.get(),
             "auto_restart_on_race": self.auto_restart_on_race.get(),
             "auto_save_presets": self.auto_save_presets.get(),
+            "lock_preset_selection": self.lock_preset_selection.get(),
             "start_with_windows": self.start_with_windows.get(),
             "keep_trying_targets": self.keep_trying_targets.get(),
             "show_scan_popup": self.show_scan_popup.get(),
@@ -5690,6 +5722,7 @@ class iRacingControlApp:
         self.auto_restart_on_rescan.set(data.get("auto_restart_on_rescan", True))
         self.auto_restart_on_race.set(data.get("auto_restart_on_race", True))
         self.auto_save_presets.set(data.get("auto_save_presets", True))
+        self.lock_preset_selection.set(data.get("lock_preset_selection", False))
         self.start_with_windows.set(data.get("start_with_windows", False))
         self.keep_trying_targets.set(data.get("keep_trying_targets", True))
         self.show_scan_popup.set(data.get("show_scan_popup", False))

@@ -3662,6 +3662,8 @@ class iRacingControlApp:
         self.start_with_windows = tk.BooleanVar(value=False)
         self.clear_target_bind: Optional[str] = None
         self.btn_clear_target_bind: Optional[tk.Button] = None
+        self.manual_rescan_bind: Optional[str] = None
+        self.btn_manual_rescan_bind: Optional[tk.Button] = None
         self.voice_phrase_map: Dict[str, Callable] = {}
         self._voice_traces_attached = False
         self._auto_save_job: Optional[str] = None
@@ -3954,6 +3956,20 @@ class iRacingControlApp:
         )
         self.btn_clear_target_bind.pack(side="left", padx=6)
 
+        rescan_frame = tk.Frame(stability_frame)
+        rescan_frame.pack(fill="x", pady=4)
+        tk.Label(
+            rescan_frame,
+            text="Manual rescan + reload hotkey (optional):"
+        ).pack(side="left")
+        self.btn_manual_rescan_bind = tk.Button(
+            rescan_frame,
+            text="Set Rescan Hotkey",
+            width=18,
+            command=self._set_manual_rescan_bind
+        )
+        self.btn_manual_rescan_bind.pack(side="left", padx=6)
+
         # Car/Track manager
         presets_frame = tk.LabelFrame(
             self.root,
@@ -4045,6 +4061,7 @@ class iRacingControlApp:
         self.rebuild_tabs(self.active_vars)
         self.update_preset_ui()
         self._refresh_clear_target_bind_button()
+        self._refresh_manual_rescan_bind_button()
 
     # ------------------------------------------------------------------
     # Options UI
@@ -4425,6 +4442,23 @@ class iRacingControlApp:
                 bg="#f0f0f0"
             )
 
+    def _refresh_manual_rescan_bind_button(self):
+        """Update the manual rescan hotkey button text/color."""
+        if not self.btn_manual_rescan_bind:
+            return
+
+        if self.manual_rescan_bind:
+            bg_color = "#90ee90" if "JOY" in self.manual_rescan_bind else "#ADD8E6"
+            self.btn_manual_rescan_bind.config(
+                text=self.manual_rescan_bind,
+                bg=bg_color
+            )
+        else:
+            self.btn_manual_rescan_bind.config(
+                text="Set Rescan Hotkey",
+                bg="#f0f0f0"
+            )
+
     def _set_clear_target_bind(self):
         """Capture an optional hotkey for clearing target attempts."""
         if self.app_state != "CONFIG":
@@ -4448,11 +4482,43 @@ class iRacingControlApp:
             self.register_current_listeners()
         self.schedule_save()
 
+    def _set_manual_rescan_bind(self):
+        """Capture an optional hotkey for manual restart + rescan."""
+        if self.app_state != "CONFIG":
+            messagebox.showinfo("Notice", "Enter CONFIG mode first.")
+            return
+
+        self.focus_window()
+        if self.btn_manual_rescan_bind:
+            self.btn_manual_rescan_bind.config(text="...", bg="yellow")
+        self.root.update_idletasks()
+
+        code = input_manager.capture_any_input()
+
+        if code and code != "CANCEL":
+            self.manual_rescan_bind = code
+        elif code == "CANCEL":
+            self.manual_rescan_bind = None
+
+        self._refresh_manual_rescan_bind_button()
+        if self.app_state == "RUNNING":
+            self.register_current_listeners()
+        self.schedule_save()
+
     def clear_all_targets(self):
         """Stop all active target adjustments."""
         for controller in self.controllers.values():
             controller.clear_target()
         self.notify_overlay_status("Targets cleared", "orange")
+
+    def trigger_manual_rescan(self):
+        """Restart the app and force a scan + preset reload."""
+        self.pending_scan_on_start = True
+        self.skip_session_scan_once = True
+        self.skip_auto_scan_once = True
+        mark_pending_scan()
+        self.save_config()
+        restart_program()
 
     # Safe mode and device management
     def update_safe_mode(self):
@@ -5557,6 +5623,7 @@ class iRacingControlApp:
             "keep_trying_targets": self.keep_trying_targets.get(),
             "show_scan_popup": self.show_scan_popup.get(),
             "clear_target_bind": self.clear_target_bind,
+            "manual_rescan_bind": self.manual_rescan_bind,
             "pending_scan_on_start": self.pending_scan_on_start,
             "rescan_restart_pair": list(self._rescan_restart_pair),
             "allowed_devices": input_manager.allowed_devices,
@@ -5616,6 +5683,7 @@ class iRacingControlApp:
         self.keep_trying_targets.set(data.get("keep_trying_targets", True))
         self.show_scan_popup.set(data.get("show_scan_popup", False))
         self.clear_target_bind = data.get("clear_target_bind")
+        self.manual_rescan_bind = data.get("manual_rescan_bind")
         self.pending_scan_on_start = data.get("pending_scan_on_start", False)
         pair = data.get("rescan_restart_pair", ["", ""])
         if isinstance(pair, (list, tuple)) and len(pair) == 2:
@@ -5958,6 +6026,15 @@ class iRacingControlApp:
                 self._hotkey_handles.append(handle)
             else:
                 input_manager.listeners[self.clear_target_bind] = action
+
+        if self.manual_rescan_bind:
+            action = self.trigger_manual_rescan
+            if self.manual_rescan_bind.startswith("KEY:"):
+                key_name = self.manual_rescan_bind.split(":", 1)[1].lower()
+                handle = keyboard.add_hotkey(key_name, action)
+                self._hotkey_handles.append(handle)
+            else:
+                input_manager.listeners[self.manual_rescan_bind] = action
 
         input_manager.active = (self.app_state == "RUNNING")
         if self.app_state != "RUNNING":

@@ -3860,123 +3860,33 @@ class iRacingControlApp:
             justify="left"
         ).pack(fill="x", padx=8, pady=4)
 
-        # Settings row
-        settings_frame = tk.Frame(self.root)
-        settings_frame.pack(fill="x", padx=10, pady=5)
+        main_tabs = ttk.Notebook(self.root)
+        main_tabs.pack(fill="both", expand=True, padx=10, pady=5)
 
-        self.check_safe = tk.Checkbutton(
-            settings_frame,
-            text="Keyboard Only Mode (requires restart)",
-            variable=self.use_keyboard_only,
-            command=self.trigger_safe_mode_update
-        )
-        self.check_safe.pack(side="left")
+        setup_tab = ttk.Frame(main_tabs)
+        controls_tab = ttk.Frame(main_tabs)
+        main_tabs.add(setup_tab, text="Setup")
+        main_tabs.add(controls_tab, text="Controls")
 
-        tk.Label(
-            settings_frame,
-            text="(No joystick/wheel buttons)",
-            fg="gray",
-            font=("Arial", 8)
-        ).pack(side="left", padx=4)
+        setup_container = tk.Frame(setup_tab)
+        setup_container.pack(fill="both", expand=True, padx=5, pady=5)
+        setup_container.columnconfigure(0, weight=3)
+        setup_container.columnconfigure(1, weight=2)
 
-        tk.Button(
-            settings_frame,
-            text="Voice/Audio Options",
-            command=self.open_voice_audio_settings
-        ).pack(side="right")
+        steps_column = tk.Frame(setup_container)
+        steps_column.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        steps_column.columnconfigure(0, weight=1)
 
-        # Auto-detect
-        auto_frame = tk.Frame(self.root)
-        auto_frame.pack(fill="x", padx=10, pady=(0, 5))
-
-        tk.Checkbutton(
-            auto_frame,
-            text="Auto-detect Car/Track via iRacing",
-            variable=self.auto_detect
-        ).pack(anchor="w")
-
-        tk.Checkbutton(
-            auto_frame,
-            text="Auto-scan when car/track changes",
-            variable=self.auto_scan_on_change,
-            command=self.schedule_save
-        ).pack(anchor="w")
-
-        stability_frame = tk.LabelFrame(
-            self.root,
-            text="Stability Options"
-        )
-        stability_frame.pack(fill="x", padx=10, pady=5)
-
-        tk.Checkbutton(
-            stability_frame,
-            text="Restart before rescanning controls (after the first scan)",
-            variable=self.auto_restart_on_rescan,
-            command=self.schedule_save
-        ).pack(anchor="w", pady=2)
-
-        tk.Checkbutton(
-            stability_frame,
-            text="Auto-restart and scan when joining a Race session",
-            variable=self.auto_restart_on_race,
-            command=self.schedule_save
-        ).pack(anchor="w", pady=2)
-
-        tk.Checkbutton(
-            stability_frame,
-            text="Show scan completion popup",
-            variable=self.show_scan_popup,
-            command=self.schedule_save
-        ).pack(anchor="w", pady=2)
-
-        tk.Checkbutton(
-            stability_frame,
-            text="Start with Windows",
-            variable=self.start_with_windows,
-            command=self._on_startup_toggle
-        ).pack(anchor="w", pady=2)
-
-        tk.Checkbutton(
-            stability_frame,
-            text="Keep trying to reach hotkey targets (no timeout)",
-            variable=self.keep_trying_targets,
-            command=self.schedule_save
-        ).pack(anchor="w", pady=2)
-
-        clear_frame = tk.Frame(stability_frame)
-        clear_frame.pack(fill="x", pady=4)
-        tk.Label(
-            clear_frame,
-            text="Clear target hotkey (optional):"
-        ).pack(side="left")
-        self.btn_clear_target_bind = tk.Button(
-            clear_frame,
-            text="Set Clear Hotkey",
-            width=18,
-            command=self._set_clear_target_bind
-        )
-        self.btn_clear_target_bind.pack(side="left", padx=6)
-
-        rescan_frame = tk.Frame(stability_frame)
-        rescan_frame.pack(fill="x", pady=4)
-        tk.Label(
-            rescan_frame,
-            text="Manual rescan hotkey (restart + scan + load preset):"
-        ).pack(side="left")
-        self.btn_manual_rescan_bind = tk.Button(
-            rescan_frame,
-            text="Set Rescan Hotkey",
-            width=18,
-            command=self._set_manual_rescan_bind
-        )
-        self.btn_manual_rescan_bind.pack(side="left", padx=6)
+        options_column = tk.Frame(setup_container)
+        options_column.grid(row=0, column=1, sticky="nsew")
+        options_column.columnconfigure(0, weight=1)
 
         # Car/Track manager
         presets_frame = tk.LabelFrame(
-            self.root,
+            steps_column,
             text="Step 1: Choose your car and track"
         )
-        presets_frame.pack(fill="x", padx=10, pady=5)
+        presets_frame.pack(fill="x", pady=(0, 8))
 
         selector_frame = tk.Frame(presets_frame)
         selector_frame.pack(fill="x", padx=5, pady=2)
@@ -4022,23 +3932,54 @@ class iRacingControlApp:
             text="Auto-save preset edits (hotkeys/macros)",
             variable=self.auto_save_presets,
             command=self.schedule_save
-        ).pack(anchor="w", padx=5, pady=(0, 5))
+        ).pack(anchor="w", padx=5, pady=(0, 2))
 
         tk.Checkbutton(
             presets_frame,
             text="Lock car/track selection (auto-managed)",
             variable=self.lock_preset_selection,
             command=self._on_lock_preset_selection_toggle
+        ).pack(anchor="w", padx=5, pady=(0, 2))
+
+        tk.Checkbutton(
+            presets_frame,
+            text="Auto-detect car/track via iRacing",
+            variable=self.auto_detect,
+            command=self.schedule_save
+        ).pack(anchor="w", padx=5, pady=(0, 2))
+
+        tk.Checkbutton(
+            presets_frame,
+            text="Auto-scan when car/track changes",
+            variable=self.auto_scan_on_change,
+            command=self.schedule_save
         ).pack(anchor="w", padx=5, pady=(0, 5))
 
         self._update_preset_lock_state()
 
         # Device management
         devices_frame = tk.LabelFrame(
-            self.root,
+            steps_column,
             text="Step 2: Confirm input devices (joystick/wheel)"
         )
-        devices_frame.pack(fill="x", padx=10, pady=5)
+        devices_frame.pack(fill="x", pady=(0, 8))
+
+        devices_note = tk.Frame(devices_frame)
+        devices_note.pack(fill="x", padx=5, pady=(4, 0))
+        self.check_safe = tk.Checkbutton(
+            devices_note,
+            text="Keyboard Only Mode (requires restart)",
+            variable=self.use_keyboard_only,
+            command=self.trigger_safe_mode_update
+        )
+        self.check_safe.pack(side="left")
+
+        tk.Label(
+            devices_note,
+            text="(No joystick/wheel buttons)",
+            fg="gray",
+            font=("Arial", 8)
+        ).pack(side="left", padx=4)
 
         tk.Button(
             devices_frame,
@@ -4048,24 +3989,105 @@ class iRacingControlApp:
         ).pack(fill="x", padx=5, pady=5)
 
         # Scan button
+        scan_frame = tk.LabelFrame(
+            steps_column,
+            text="Step 3: Scan driver controls"
+        )
+        scan_frame.pack(fill="x")
+
         self.btn_scan = tk.Button(
-            self.root,
-            text="Step 3: Scan driver controls for the selected car",
+            scan_frame,
+            text="Scan controls for the selected car",
             command=self.scan_driver_controls,
             bg="lightblue"
         )
-        self.btn_scan.pack(fill="x", padx=10, pady=5)
+        self.btn_scan.pack(fill="x", padx=5, pady=5)
 
         tk.Label(
-            self.root,
+            scan_frame,
             text="Tip: Scan after changing devices or presets to keep bindings in sync.",
             fg="gray",
             font=("Arial", 9)
-        ).pack(fill="x", padx=12, pady=(0, 4))
+        ).pack(fill="x", padx=8, pady=(0, 6))
+
+        stability_frame = tk.LabelFrame(
+            options_column,
+            text="Automation & Shortcuts"
+        )
+        stability_frame.pack(fill="both", expand=True)
+
+        tk.Button(
+            stability_frame,
+            text="Voice/Audio Options",
+            command=self.open_voice_audio_settings
+        ).pack(fill="x", padx=8, pady=(8, 6))
+
+        tk.Checkbutton(
+            stability_frame,
+            text="Restart before rescanning controls (after the first scan)",
+            variable=self.auto_restart_on_rescan,
+            command=self.schedule_save
+        ).pack(anchor="w", padx=8, pady=2)
+
+        tk.Checkbutton(
+            stability_frame,
+            text="Auto-restart and scan when joining a Race session",
+            variable=self.auto_restart_on_race,
+            command=self.schedule_save
+        ).pack(anchor="w", padx=8, pady=2)
+
+        tk.Checkbutton(
+            stability_frame,
+            text="Show scan completion popup",
+            variable=self.show_scan_popup,
+            command=self.schedule_save
+        ).pack(anchor="w", padx=8, pady=2)
+
+        tk.Checkbutton(
+            stability_frame,
+            text="Start with Windows",
+            variable=self.start_with_windows,
+            command=self._on_startup_toggle
+        ).pack(anchor="w", padx=8, pady=2)
+
+        tk.Checkbutton(
+            stability_frame,
+            text="Keep trying to reach hotkey targets (no timeout)",
+            variable=self.keep_trying_targets,
+            command=self.schedule_save
+        ).pack(anchor="w", padx=8, pady=2)
+
+        clear_frame = tk.Frame(stability_frame)
+        clear_frame.pack(fill="x", padx=8, pady=6)
+        tk.Label(
+            clear_frame,
+            text="Clear target hotkey (optional):"
+        ).pack(side="left")
+        self.btn_clear_target_bind = tk.Button(
+            clear_frame,
+            text="Set Clear Hotkey",
+            width=18,
+            command=self._set_clear_target_bind
+        )
+        self.btn_clear_target_bind.pack(side="left", padx=6)
+
+        rescan_frame = tk.Frame(stability_frame)
+        rescan_frame.pack(fill="x", padx=8, pady=(0, 8))
+        tk.Label(
+            rescan_frame,
+            text="Manual rescan hotkey (restart + scan + load preset):"
+        ).pack(side="left")
+        self.btn_manual_rescan_bind = tk.Button(
+            rescan_frame,
+            text="Set Rescan Hotkey",
+            width=18,
+            command=self._set_manual_rescan_bind
+        )
+        self.btn_manual_rescan_bind.pack(side="left", padx=6)
 
         # Main notebook
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True, padx=10, pady=5)
+        self.notebook = ttk.Notebook(controls_tab)
+        self.notebook.pack(fill="both", expand=True, padx=5, pady=5)
 
         # Initialize with default variables if none exist
         if not self.active_vars:

@@ -4067,13 +4067,13 @@ class iRacingControlApp:
         )
         self.btn_save_preset.pack(side="left", expand=True, fill="x", padx=2)
 
-        self.btn_delete_preset = tk.Button(
+        self.btn_clear_preset = tk.Button(
             actions_frame,
-            text="Delete",
-            command=self.action_delete_preset,
+            text="Clear",
+            command=self.action_clear_preset,
             bg="#ffcccc"
         )
-        self.btn_delete_preset.pack(side="left", expand=True, fill="x", padx=2)
+        self.btn_clear_preset.pack(side="left", expand=True, fill="x", padx=2)
 
         # Device management
         devices_frame = tk.LabelFrame(
@@ -4794,10 +4794,10 @@ class iRacingControlApp:
         state = "disabled" if locked else "normal"
         self.combo_car.configure(state=state)
         self.combo_track.configure(state=state)
-        button_state = tk.DISABLED if locked else tk.NORMAL
-        self.btn_load_preset.configure(state=button_state)
-        self.btn_save_preset.configure(state=button_state)
-        self.btn_delete_preset.configure(state=button_state)
+        load_state = tk.DISABLED if locked else tk.NORMAL
+        self.btn_load_preset.configure(state=load_state)
+        self.btn_save_preset.configure(state=tk.NORMAL)
+        self.btn_clear_preset.configure(state=tk.NORMAL)
 
     def on_car_selected(self, _event):
         """Handle car selection."""
@@ -4926,8 +4926,8 @@ class iRacingControlApp:
         self.current_track = track
         self.load_specific_preset(car, track)
 
-    def action_delete_preset(self):
-        """Delete selected preset."""
+    def action_clear_preset(self):
+        """Clear selected preset."""
         car = self.combo_car.get()
         track = self.combo_track.get()
 
@@ -4937,27 +4937,18 @@ class iRacingControlApp:
         if car in self.saved_presets and track in self.saved_presets[car]:
             if not messagebox.askyesno(
                 "Confirm", 
-                f"Delete preset for {car} @ {track}?"
+                f"Clear preset for {car} @ {track}?"
             ):
                 return
 
-            del self.saved_presets[car][track]
-
-            # Remove car if no more tracks
-            if not [
-                t for t in self.saved_presets[car].keys()
-                if t not in {"_overlay", "_overlay_feedback"}
-            ]:
-                del self.saved_presets[car]
-                if car in self.car_overlay_config:
-                    del self.car_overlay_config[car]
-                if car in self.car_overlay_feedback:
-                    del self.car_overlay_feedback[car]
+            self.saved_presets[car][track] = {
+                "active_vars": None,
+                "tabs": {},
+                "combo": {}
+            }
 
             self.save_config()
             self.update_preset_ui()
-            self.combo_track.set("")
-            self.current_track = ""
 
     def auto_preset_loop(self):
         """Background loop for auto-detecting car/track."""

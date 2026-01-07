@@ -15,8 +15,7 @@ Version: 4.0.0
 """
 
 import tkinter as tk
-from tkinter import messagebox, colorchooser, filedialog
-import ttkbootstrap as ttk
+from tkinter import ttk, messagebox, colorchooser, filedialog
 import time
 import ctypes
 import keyboard
@@ -199,26 +198,6 @@ except Exception as exc:  # noqa: BLE001
 # ======================================================================
 APP_NAME = "DominantControl"
 APP_VERSION = "4.0.0"
-
-UI_THEME = {
-    "name": "superhero",
-    "font": ("Segoe UI", 10),
-    "font_bold": ("Segoe UI", 10, "bold")
-}
-
-
-def apply_app_theme(root: tk.Tk) -> ttk.Style:
-    """Apply the ttkbootstrap theme and shared Tk defaults."""
-    style = ttk.Style(UI_THEME["name"])
-    root.option_add("*Font", UI_THEME["font"])
-    root.option_add("*Background", style.colors.bg)
-    root.option_add("*Foreground", style.colors.fg)
-    root.option_add("*HighlightBackground", style.colors.bg)
-    root.option_add("*HighlightColor", style.colors.primary)
-    style.configure("TLabelframe.Label", font=UI_THEME["font_bold"])
-    style.configure("Heading.TLabel", font=("Segoe UI", 11, "bold"))
-    style.configure("Muted.TLabel", foreground=style.colors.secondary)
-    return style
 APP_FOLDER = "DominantControl"
 BASE_PATH = os.getenv("APPDATA") or os.path.expanduser("~")
 CONFIG_FOLDER = os.path.join(BASE_PATH, APP_FOLDER, "configs")
@@ -1578,11 +1557,11 @@ class VoiceTestDialog(tk.Toplevel):
         self.status_var = tk.StringVar(value="Waiting for test...")
         self.heard_var = tk.StringVar(value="(nothing yet)")
 
-        self.btn_listen = ttk.Button(
+        self.btn_listen = tk.Button(
             self,
             text="🎤 Listen and Test",
             command=self.start_listen,
-            bootstyle="info"
+            bg="#ADD8E6"
         )
         self.btn_listen.pack(fill="x", padx=10, pady=4)
 
@@ -1603,11 +1582,11 @@ class VoiceTestDialog(tk.Toplevel):
         )
         self.entry_manual = ttk.Entry(manual)
         self.entry_manual.pack(fill="x", pady=2)
-        ttk.Button(
+        tk.Button(
             manual,
             text="Run macro",
             command=self.run_manual_phrase,
-            bootstyle="success"
+            bg="#90ee90"
         ).pack(fill="x", pady=2)
 
     def start_listen(self):
@@ -1693,7 +1672,7 @@ class DeviceSelector(tk.Toplevel):
             fg="gray"
         ).pack()
 
-        self.frame_list = ttk.Frame(self)
+        self.frame_list = tk.Frame(self)
         self.frame_list.pack(fill="both", expand=True, padx=10, pady=10)
 
         self.check_vars: Dict[str, tk.BooleanVar] = {}
@@ -1707,7 +1686,7 @@ class DeviceSelector(tk.Toplevel):
                 # First run defaults to nothing selected
                 var.set(False)
 
-            chk = ttk.Checkbutton(
+            chk = tk.Checkbutton(
                 self.frame_list, 
                 text=name, 
                 variable=var, 
@@ -1716,11 +1695,12 @@ class DeviceSelector(tk.Toplevel):
             chk.pack(fill="x")
             self.check_vars[name] = var
 
-        ttk.Button(
+        tk.Button(
             self,
             text="Save and Apply",
             command=self.save,
-            bootstyle="success"
+            bg="#90ee90",
+            height=2
         ).pack(fill="x", padx=10, pady=10)
 
     def save(self):
@@ -1997,14 +1977,13 @@ class OverlayConfigTab(tk.Frame):
         ).pack(anchor="w", pady=(5, 5))
 
         # Global appearance settings
-        appearance_frame = ttk.LabelFrame(self.body, text="Global HUD Appearance")
+        appearance_frame = tk.LabelFrame(self.body, text="Global HUD Appearance")
         appearance_frame.pack(fill="x", padx=5, pady=5)
 
-        self.btn_bg = ttk.Button(
+        self.btn_bg = tk.Button(
             appearance_frame, 
             text="Background Color", 
-            command=self.pick_background_color,
-            bootstyle="secondary"
+            command=self.pick_background_color
         )
         self.btn_bg.grid(row=0, column=0, padx=5, pady=5, sticky="w")
 
@@ -2016,11 +1995,10 @@ class OverlayConfigTab(tk.Frame):
         )
         self.lbl_bg_preview.grid(row=0, column=1, padx=5, pady=5)
 
-        self.btn_fg = ttk.Button(
+        self.btn_fg = tk.Button(
             appearance_frame, 
             text="Text Color", 
-            command=self.pick_text_color,
-            bootstyle="secondary"
+            command=self.pick_text_color
         )
         self.btn_fg.grid(row=1, column=0, padx=5, pady=5, sticky="w")
 
@@ -2061,12 +2039,12 @@ class OverlayConfigTab(tk.Frame):
         for i in range(2):
             appearance_frame.columnconfigure(i, weight=1)
 
-        feedback_frame = ttk.LabelFrame(
+        feedback_frame = tk.LabelFrame(
             self.body, text="Assist Feedback Thresholds (per car)"
         )
         feedback_frame.pack(fill="x", padx=5, pady=5)
 
-        ttk.Checkbutton(
+        tk.Checkbutton(
             feedback_frame,
             text="Show ABS / TC / slip hints on the HUD",
             variable=self.app.show_overlay_feedback,
@@ -2110,21 +2088,21 @@ class OverlayConfigTab(tk.Frame):
 
         self._set_feedback_fields_enabled(self.app.show_overlay_feedback.get())
 
-        ttk.Button(
+        tk.Button(
             appearance_frame,
             text="Apply Style",
             command=self.apply_style,
-            bootstyle="success"
+            bg="#90ee90"
         ).grid(row=4, column=0, columnspan=2, sticky="we", padx=5, pady=(5, 5))
 
         # Variable selection (per-car)
-        variables_frame = ttk.LabelFrame(
+        variables_frame = tk.LabelFrame(
             self.body, 
             text="Variables to Display (per car)"
         )
         variables_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
-        header = ttk.Frame(variables_frame)
+        header = tk.Frame(variables_frame)
         header.pack(fill="x", pady=(3, 3))
         
         tk.Label(header, text="Show", width=8, anchor="w").pack(
@@ -2204,11 +2182,11 @@ class OverlayConfigTab(tk.Frame):
         for var_name, _is_float in var_list:
             config = overlay_config.get(var_name, {})
 
-            row = ttk.Frame(self.variables_list_frame)
+            row = tk.Frame(self.variables_list_frame)
             row.pack(fill="x", pady=2)
 
             show_var = tk.BooleanVar(value=config.get("show", False))
-            checkbox = ttk.Checkbutton(row, variable=show_var)
+            checkbox = tk.Checkbutton(row, variable=show_var)
             checkbox.pack(side="left", padx=2)
 
             tk.Label(row, text=var_name, width=25, anchor="w").pack(
@@ -2688,7 +2666,7 @@ class ControlTab(tk.Frame):
         body = scroll_frame.inner
 
         # Key configuration
-        keys_frame = ttk.LabelFrame(
+        keys_frame = tk.LabelFrame(
             body, 
             text=f"Keys ({label_name})", 
             padx=5, 
@@ -2696,27 +2674,25 @@ class ControlTab(tk.Frame):
         )
         keys_frame.pack(fill="x", padx=5, pady=5)
 
-        self.btn_increase = ttk.Button(
+        self.btn_increase = tk.Button(
             keys_frame,
             text="Set Increase (+)",
-            command=lambda: self.bind_game_key("increase"),
-            bootstyle="primary"
+            command=lambda: self.bind_game_key("increase")
         )
         self.btn_increase.pack(side="left", expand=True, fill="x", padx=2)
 
-        self.btn_decrease = ttk.Button(
+        self.btn_decrease = tk.Button(
             keys_frame,
             text="Set Decrease (-)",
-            command=lambda: self.bind_game_key("decrease"),
-            bootstyle="primary"
+            command=lambda: self.bind_game_key("decrease")
         )
         self.btn_decrease.pack(side="left", expand=True, fill="x", padx=2)
 
-        ttk.Button(
+        tk.Button(
             keys_frame,
             text="Test custom minimal time",
             command=self.run_bot_timing_probe,
-            bootstyle="info"
+            bg="#f0f8ff"
         ).pack(side="left", padx=2)
 
         # Current value monitor
@@ -2732,7 +2708,7 @@ class ControlTab(tk.Frame):
         self.lbl_status.pack()
 
         # Presets/Macros
-        presets_frame = ttk.LabelFrame(
+        presets_frame = tk.LabelFrame(
             body, 
             text="Presets / Macros", 
             padx=5, 
@@ -2874,7 +2850,7 @@ class ControlTab(tk.Frame):
 
         btn = self.btn_increase if direction == "increase" else self.btn_decrease
         original_text = btn["text"]
-        btn.config(text="PRESS KEY...", bootstyle="warning")
+        btn.config(text="PRESS KEY...", bg="yellow")
         self.update_idletasks()
 
         scan_code, key_name = input_manager.capture_keyboard_scancode()
@@ -2884,19 +2860,19 @@ class ControlTab(tk.Frame):
                 self.controller.key_increase = None
             else:
                 self.controller.key_decrease = None
-            btn.config(text=original_text, bootstyle="secondary")
+            btn.config(text=original_text, bg="#f0f0f0")
         elif scan_code:
             if direction == "increase":
                 self.controller.key_increase = scan_code
             else:
                 self.controller.key_decrease = scan_code
-            btn.config(text=f"OK: {key_name.upper()}", bootstyle="success")
+            btn.config(text=f"OK: {key_name.upper()}", bg="#90ee90")
         else:
-            btn.config(text=original_text, bootstyle="secondary")
+            btn.config(text=original_text, bg="#f0f0f0")
 
         self.app.schedule_preset_save()
 
-    def _config_bind_button(self, button: ttk.Button, data_store: Dict[str, Any]):
+    def _config_bind_button(self, button: tk.Button, data_store: Dict[str, Any]):
         """Configure binding button behavior."""
         def on_click():
             if self.app.app_state != "CONFIG":
@@ -2905,18 +2881,18 @@ class ControlTab(tk.Frame):
 
             self.app.focus_window()
 
-            button.config(text="...", bootstyle="warning")
+            button.config(text="...", bg="yellow")
             self.update_idletasks()
 
             code = input_manager.capture_any_input()
 
             if code and code != "CANCEL":
                 data_store["bind"] = code
-                bootstyle = "success" if "JOY" in code else "info"
-                button.config(text=code, bootstyle=bootstyle)
+                bg_color = "#90ee90" if "JOY" in code else "#ADD8E6"
+                button.config(text=code, bg=bg_color)
             elif code == "CANCEL":
                 data_store["bind"] = None
-                button.config(text="Set Bind", bootstyle="secondary")
+                button.config(text="Set Bind", bg="#f0f0f0")
 
             self.app.schedule_preset_save()
 
@@ -2947,7 +2923,7 @@ class ControlTab(tk.Frame):
         if self.app.app_state != "CONFIG":
             value_entry.config(state="readonly")
 
-        bind_button = ttk.Button(frame, text="Set Bind", width=12, bootstyle="secondary")
+        bind_button = tk.Button(frame, text="Set Bind", width=12)
         bind_button.pack(side="left", padx=5)
 
         voice_entry = ttk.Entry(frame, width=18)
@@ -2975,10 +2951,10 @@ class ControlTab(tk.Frame):
 
             row_data["bind"] = existing.get("bind")
             if row_data["bind"]:
-                bootstyle = (
-                    "success" if "JOY" in row_data["bind"] else "info"
+                bg_color = (
+                    "#90ee90" if "JOY" in row_data["bind"] else "#ADD8E6"
                 )
-                bind_button.config(text=row_data["bind"], bootstyle=bootstyle)
+                bind_button.config(text=row_data["bind"], bg=bg_color)
 
             voice_text = existing.get("voice_phrase", "")
             voice_entry.config(state="normal")
@@ -3151,11 +3127,11 @@ class ComboTab(tk.Frame):
         self.presets_container = tk.Frame(body)
         self.presets_container.pack(fill="both", expand=True, padx=5, pady=5)
 
-        ttk.Button(
+        tk.Button(
             body,
             text="Add Row (+)",
             command=self.add_dynamic_row,
-            bootstyle="secondary"
+            bg="#f0f0f0"
         ).pack(fill="x", padx=5, pady=(0, 5))
 
         # Add initial rows
@@ -3191,7 +3167,7 @@ class ComboTab(tk.Frame):
             lambda _event: self.app.schedule_preset_save()
         )
 
-    def _config_bind_button(self, button: ttk.Button, data_store: Dict[str, Any]):
+    def _config_bind_button(self, button: tk.Button, data_store: Dict[str, Any]):
         """Configure binding button behavior."""
         def on_click():
             if self.app.app_state != "CONFIG":
@@ -3200,18 +3176,18 @@ class ComboTab(tk.Frame):
 
             self.app.focus_window()
 
-            button.config(text="...", bootstyle="warning")
+            button.config(text="...", bg="yellow")
             self.update_idletasks()
 
             code = input_manager.capture_any_input()
 
             if code and code != "CANCEL":
                 data_store["bind"] = code
-                bootstyle = "success" if "JOY" in code else "info"
-                button.config(text=code, bootstyle=bootstyle)
+                bg_color = "#90ee90" if "JOY" in code else "#ADD8E6"
+                button.config(text=code, bg=bg_color)
             elif code == "CANCEL":
                 data_store["bind"] = None
-                button.config(text="Set Bind", bootstyle="secondary")
+                button.config(text="Set Bind", bg="#f0f0f0")
 
             self.app.schedule_preset_save()
 
@@ -3226,11 +3202,11 @@ class ComboTab(tk.Frame):
         frame = tk.Frame(self.presets_container)
         frame.pack(fill="x", pady=2)
 
-        bind_button = ttk.Button(
+        bind_button = tk.Button(
             frame,
             text="RESET" if is_reset else "Set Bind",
             width=15,
-            bootstyle="danger" if is_reset else "secondary"
+            fg="red" if is_reset else "black"
         )
         bind_button.pack(side="left", padx=2)
 
@@ -3254,12 +3230,12 @@ class ComboTab(tk.Frame):
 
         # Delete button (except for RESET)
         if not is_reset:
-            ttk.Button(
+            tk.Button(
                 frame,
                 text="X",
+                fg="red",
                 command=lambda r=row_data: self.remove_row(r),
-                width=2,
-                bootstyle="danger"
+                width=2
             ).pack(side="left", padx=5)
 
         # Load existing data if provided
@@ -3275,10 +3251,10 @@ class ComboTab(tk.Frame):
 
             row_data["bind"] = existing.get("bind")
             if row_data["bind"]:
-                bootstyle = (
-                    "success" if "JOY" in row_data["bind"] else "info"
+                bg_color = (
+                    "#90ee90" if "JOY" in row_data["bind"] else "#ADD8E6"
                 )
-                bind_button.config(text=row_data["bind"], bootstyle=bootstyle)
+                bind_button.config(text=row_data["bind"], bg=bg_color)
 
         voice_entry = ttk.Entry(frame, width=18)
         voice_entry.pack(side="left", padx=4)
@@ -3366,18 +3342,18 @@ class GlobalTimingWindow(tk.Toplevel):
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True, padx=10, pady=10)
 
-        timing_frame = ttk.Frame(notebook)
+        timing_frame = tk.Frame(notebook)
         notebook.add(timing_frame, text="Timing")
 
         # Profile selection
-        profiles_frame = ttk.LabelFrame(timing_frame, text="Behavior Profiles")
+        profiles_frame = tk.LabelFrame(timing_frame, text="Behavior Profiles")
         profiles_frame.pack(fill="x", padx=10, pady=5)
 
         self.var_profile = tk.StringVar(
             value=GLOBAL_TIMING.get("profile", "aggressive")
         )
 
-        ttk.Radiobutton(
+        tk.Radiobutton(
             profiles_frame,
             text="😈 Aggressive (fast, robotic)",
             variable=self.var_profile,
@@ -3385,7 +3361,7 @@ class GlobalTimingWindow(tk.Toplevel):
             command=self._on_profile_change
         ).pack(anchor="w", padx=5, pady=2)
 
-        ttk.Radiobutton(
+        tk.Radiobutton(
             profiles_frame,
             text="🙂 Casual (more relaxed)",
             variable=self.var_profile,
@@ -3393,7 +3369,7 @@ class GlobalTimingWindow(tk.Toplevel):
             command=self._on_profile_change
         ).pack(anchor="w", padx=5, pady=2)
 
-        ttk.Radiobutton(
+        tk.Radiobutton(
             profiles_frame,
             text="😎 Relaxed (well-spaced)",
             variable=self.var_profile,
@@ -3401,7 +3377,7 @@ class GlobalTimingWindow(tk.Toplevel):
             command=self._on_profile_change
         ).pack(anchor="w", padx=5, pady=2)
 
-        ttk.Radiobutton(
+        tk.Radiobutton(
             profiles_frame,
             text="🤖 BOT (experimental, near-zero delay)",
             variable=self.var_profile,
@@ -3409,7 +3385,7 @@ class GlobalTimingWindow(tk.Toplevel):
             command=self._on_profile_change
         ).pack(anchor="w", padx=5, pady=2)
 
-        ttk.Radiobutton(
+        tk.Radiobutton(
             profiles_frame,
             text="🛠 Custom (define values below)",
             variable=self.var_profile,
@@ -3418,7 +3394,7 @@ class GlobalTimingWindow(tk.Toplevel):
         ).pack(anchor="w", padx=5, pady=(2, 5))
 
         # Custom settings
-        self.custom_frame = ttk.LabelFrame(
+        self.custom_frame = tk.LabelFrame(
             timing_frame, 
             text="Custom Settings (this profile only)"
         )
@@ -3463,7 +3439,7 @@ class GlobalTimingWindow(tk.Toplevel):
         self.var_random = tk.BooleanVar(
             value=GLOBAL_TIMING.get("random_enabled", False)
         )
-        self.check_random = ttk.Checkbutton(
+        self.check_random = tk.Checkbutton(
             self.custom_frame,
             text="Randomize (humanize)",
             variable=self.var_random,
@@ -3486,11 +3462,12 @@ class GlobalTimingWindow(tk.Toplevel):
             self.custom_frame.columnconfigure(i, weight=1)
 
         # Save button
-        ttk.Button(
+        tk.Button(
             self,
             text="💾 SAVE",
             command=self.save_all,
-            bootstyle="success"
+            bg="#90ee90",
+            height=2
         ).pack(fill="x", padx=10, pady=10)
 
         self._on_profile_change()
@@ -3654,9 +3631,9 @@ class iRacingControlApp:
         self.vosk_status_var = tk.StringVar(value="")
         self.whisper_status_var = tk.StringVar(value="")
         self.voice_engine_combo: Optional[ttk.Combobox] = None
-        self.btn_vosk_model: Optional[ttk.Button] = None
-        self.btn_whisper_binary: Optional[ttk.Button] = None
-        self.btn_whisper_model: Optional[ttk.Button] = None
+        self.btn_vosk_model: Optional[tk.Button] = None
+        self.btn_whisper_binary: Optional[tk.Button] = None
+        self.btn_whisper_model: Optional[tk.Button] = None
         self.mic_combo: Optional[ttk.Combobox] = None
         self.audio_output_combo: Optional[ttk.Combobox] = None
         self.voice_ambient_duration = tk.DoubleVar(
@@ -3685,9 +3662,9 @@ class iRacingControlApp:
         self.lock_preset_selection = tk.BooleanVar(value=False)
         self.start_with_windows = tk.BooleanVar(value=False)
         self.clear_target_bind: Optional[str] = None
-        self.btn_clear_target_bind: Optional[ttk.Button] = None
+        self.btn_clear_target_bind: Optional[tk.Button] = None
         self.manual_rescan_bind: Optional[str] = None
-        self.btn_manual_rescan_bind: Optional[ttk.Button] = None
+        self.btn_manual_rescan_bind: Optional[tk.Button] = None
         self.voice_phrase_map: Dict[str, Callable] = {}
         self._voice_traces_attached = False
         self._auto_save_job: Optional[str] = None
@@ -3852,18 +3829,20 @@ class iRacingControlApp:
     def _create_main_ui(self):
         """Create main user interface."""
         # Mode toggle button
-        mode_frame = ttk.Frame(self.root, padding=5)
+        mode_frame = tk.Frame(self.root, pady=5)
         mode_frame.pack(fill="x", padx=10)
 
-        self.btn_mode = ttk.Button(
+        self.btn_mode = tk.Button(
             mode_frame,
             text="Mode: RUNNING",
+            bg="#90ee90",
             command=self.toggle_mode,
-            bootstyle="success"
+            font=("Arial", 10, "bold"),
+            height=2
         )
         self.btn_mode.pack(fill="x")
 
-        helper_frame = ttk.LabelFrame(
+        helper_frame = tk.LabelFrame(
             self.root,
             text="Getting started"
         )
@@ -3874,7 +3853,7 @@ class iRacingControlApp:
             "2) confirm your input devices, then 3) scan driver controls. "
             "Use CONFIG mode when changing bindings and RUNNING mode when driving."
         )
-        ttk.Label(
+        tk.Label(
             helper_frame,
             text=helper_text,
             wraplength=760,
@@ -3889,87 +3868,87 @@ class iRacingControlApp:
         main_tabs.add(setup_tab, text="Setup")
         main_tabs.add(controls_tab, text="Controls")
 
-        setup_container = ttk.Frame(setup_tab)
+        setup_container = tk.Frame(setup_tab)
         setup_container.pack(fill="both", expand=True, padx=5, pady=5)
         setup_container.columnconfigure(0, weight=3)
         setup_container.columnconfigure(1, weight=2)
 
-        steps_column = ttk.Frame(setup_container)
+        steps_column = tk.Frame(setup_container)
         steps_column.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         steps_column.columnconfigure(0, weight=1)
 
-        options_column = ttk.Frame(setup_container)
+        options_column = tk.Frame(setup_container)
         options_column.grid(row=0, column=1, sticky="nsew")
         options_column.columnconfigure(0, weight=1)
 
         # Car/Track manager
-        presets_frame = ttk.LabelFrame(
+        presets_frame = tk.LabelFrame(
             steps_column,
             text="Step 1: Choose your car and track"
         )
         presets_frame.pack(fill="x", pady=(0, 8))
 
-        selector_frame = ttk.Frame(presets_frame)
+        selector_frame = tk.Frame(presets_frame)
         selector_frame.pack(fill="x", padx=5, pady=2)
 
-        ttk.Label(selector_frame, text="Car:").pack(side="left")
+        tk.Label(selector_frame, text="Car:").pack(side="left")
         self.combo_car = ttk.Combobox(selector_frame, width=30)
         self.combo_car.pack(side="left", padx=5)
         self.combo_car.bind("<<ComboboxSelected>>", self.on_car_selected)
 
-        ttk.Label(selector_frame, text="Track:").pack(side="left")
+        tk.Label(selector_frame, text="Track:").pack(side="left")
         self.combo_track = ttk.Combobox(selector_frame, width=30)
         self.combo_track.pack(side="left", padx=5)
 
-        actions_frame = ttk.Frame(presets_frame)
+        actions_frame = tk.Frame(presets_frame)
         actions_frame.pack(fill="x", padx=5, pady=5)
 
-        self.btn_load_preset = ttk.Button(
+        self.btn_load_preset = tk.Button(
             actions_frame,
             text="Load",
             command=self.action_load_preset,
-            bootstyle="secondary"
+            bg="#e0e0e0"
         )
         self.btn_load_preset.pack(side="left", expand=True, fill="x", padx=2)
 
-        self.btn_save_preset = ttk.Button(
+        self.btn_save_preset = tk.Button(
             actions_frame,
             text="Save Current",
             command=self.action_save_preset,
-            bootstyle="info"
+            bg="#ADD8E6"
         )
         self.btn_save_preset.pack(side="left", expand=True, fill="x", padx=2)
 
-        self.btn_delete_preset = ttk.Button(
+        self.btn_delete_preset = tk.Button(
             actions_frame,
             text="Delete",
             command=self.action_delete_preset,
-            bootstyle="danger"
+            bg="#ffcccc"
         )
         self.btn_delete_preset.pack(side="left", expand=True, fill="x", padx=2)
 
-        ttk.Checkbutton(
+        tk.Checkbutton(
             presets_frame,
             text="Auto-save preset edits (hotkeys/macros)",
             variable=self.auto_save_presets,
             command=self.schedule_save
         ).pack(anchor="w", padx=5, pady=(0, 2))
 
-        ttk.Checkbutton(
+        tk.Checkbutton(
             presets_frame,
             text="Lock car/track selection (auto-managed)",
             variable=self.lock_preset_selection,
             command=self._on_lock_preset_selection_toggle
         ).pack(anchor="w", padx=5, pady=(0, 2))
 
-        ttk.Checkbutton(
+        tk.Checkbutton(
             presets_frame,
             text="Auto-detect car/track via iRacing",
             variable=self.auto_detect,
             command=self.schedule_save
         ).pack(anchor="w", padx=5, pady=(0, 2))
 
-        ttk.Checkbutton(
+        tk.Checkbutton(
             presets_frame,
             text="Auto-scan when car/track changes",
             variable=self.auto_scan_on_change,
@@ -3979,15 +3958,15 @@ class iRacingControlApp:
         self._update_preset_lock_state()
 
         # Device management
-        devices_frame = ttk.LabelFrame(
+        devices_frame = tk.LabelFrame(
             steps_column,
             text="Step 2: Confirm input devices (joystick/wheel)"
         )
         devices_frame.pack(fill="x", pady=(0, 8))
 
-        devices_note = ttk.Frame(devices_frame)
+        devices_note = tk.Frame(devices_frame)
         devices_note.pack(fill="x", padx=5, pady=(4, 0))
-        self.check_safe = ttk.Checkbutton(
+        self.check_safe = tk.Checkbutton(
             devices_note,
             text="Keyboard Only Mode (requires restart)",
             variable=self.use_keyboard_only,
@@ -3995,115 +3974,114 @@ class iRacingControlApp:
         )
         self.check_safe.pack(side="left")
 
-        ttk.Label(
+        tk.Label(
             devices_note,
             text="(No joystick/wheel buttons)",
-            bootstyle="secondary"
+            fg="gray",
+            font=("Arial", 8)
         ).pack(side="left", padx=4)
 
-        ttk.Button(
+        tk.Button(
             devices_frame,
             text="🎮 Manage Devices",
             command=self.open_device_manager,
-            bootstyle="secondary"
+            bg="#e0e0e0"
         ).pack(fill="x", padx=5, pady=5)
 
         # Scan button
-        scan_frame = ttk.LabelFrame(
+        scan_frame = tk.LabelFrame(
             steps_column,
             text="Step 3: Scan driver controls"
         )
         scan_frame.pack(fill="x")
 
-        self.btn_scan = ttk.Button(
+        self.btn_scan = tk.Button(
             scan_frame,
             text="Scan controls for the selected car",
             command=self.scan_driver_controls,
-            bootstyle="info"
+            bg="lightblue"
         )
         self.btn_scan.pack(fill="x", padx=5, pady=5)
 
-        ttk.Label(
+        tk.Label(
             scan_frame,
             text="Tip: Scan after changing devices or presets to keep bindings in sync.",
-            bootstyle="secondary"
+            fg="gray",
+            font=("Arial", 9)
         ).pack(fill="x", padx=8, pady=(0, 6))
 
-        stability_frame = ttk.LabelFrame(
+        stability_frame = tk.LabelFrame(
             options_column,
             text="Automation & Shortcuts"
         )
         stability_frame.pack(fill="both", expand=True)
 
-        ttk.Button(
+        tk.Button(
             stability_frame,
             text="Voice/Audio Options",
-            command=self.open_voice_audio_settings,
-            bootstyle="primary"
+            command=self.open_voice_audio_settings
         ).pack(fill="x", padx=8, pady=(8, 6))
 
-        ttk.Checkbutton(
+        tk.Checkbutton(
             stability_frame,
             text="Restart before rescanning controls (after the first scan)",
             variable=self.auto_restart_on_rescan,
             command=self.schedule_save
         ).pack(anchor="w", padx=8, pady=2)
 
-        ttk.Checkbutton(
+        tk.Checkbutton(
             stability_frame,
             text="Auto-restart and scan when joining a Race session",
             variable=self.auto_restart_on_race,
             command=self.schedule_save
         ).pack(anchor="w", padx=8, pady=2)
 
-        ttk.Checkbutton(
+        tk.Checkbutton(
             stability_frame,
             text="Show scan completion popup",
             variable=self.show_scan_popup,
             command=self.schedule_save
         ).pack(anchor="w", padx=8, pady=2)
 
-        ttk.Checkbutton(
+        tk.Checkbutton(
             stability_frame,
             text="Start with Windows",
             variable=self.start_with_windows,
             command=self._on_startup_toggle
         ).pack(anchor="w", padx=8, pady=2)
 
-        ttk.Checkbutton(
+        tk.Checkbutton(
             stability_frame,
             text="Keep trying to reach hotkey targets (no timeout)",
             variable=self.keep_trying_targets,
             command=self.schedule_save
         ).pack(anchor="w", padx=8, pady=2)
 
-        clear_frame = ttk.Frame(stability_frame)
+        clear_frame = tk.Frame(stability_frame)
         clear_frame.pack(fill="x", padx=8, pady=6)
-        ttk.Label(
+        tk.Label(
             clear_frame,
             text="Clear target hotkey (optional):"
         ).pack(side="left")
-        self.btn_clear_target_bind = ttk.Button(
+        self.btn_clear_target_bind = tk.Button(
             clear_frame,
             text="Set Clear Hotkey",
             width=18,
-            command=self._set_clear_target_bind,
-            bootstyle="secondary"
+            command=self._set_clear_target_bind
         )
         self.btn_clear_target_bind.pack(side="left", padx=6)
 
-        rescan_frame = ttk.Frame(stability_frame)
+        rescan_frame = tk.Frame(stability_frame)
         rescan_frame.pack(fill="x", padx=8, pady=(0, 8))
-        ttk.Label(
+        tk.Label(
             rescan_frame,
             text="Manual rescan hotkey (restart + scan + load preset):"
         ).pack(side="left")
-        self.btn_manual_rescan_bind = ttk.Button(
+        self.btn_manual_rescan_bind = tk.Button(
             rescan_frame,
             text="Set Rescan Hotkey",
             width=18,
-            command=self._set_manual_rescan_bind,
-            bootstyle="secondary"
+            command=self._set_manual_rescan_bind
         )
         self.btn_manual_rescan_bind.pack(side="left", padx=6)
 
@@ -4251,18 +4229,18 @@ class iRacingControlApp:
     def _build_voice_audio_tab(self, parent: tk.Widget):
         """Construct the tab containing voice and audio controls."""
 
-        toggles_frame = ttk.Frame(parent)
+        toggles_frame = tk.Frame(parent)
         toggles_frame.pack(fill="x", pady=4)
 
         if HAS_TTS:
-            ttk.Checkbutton(
+            tk.Checkbutton(
                 toggles_frame,
                 text="Voice (TTS)",
                 variable=self.use_tts,
                 command=self.schedule_save
             ).pack(side="left", padx=4)
 
-        ttk.Checkbutton(
+        tk.Checkbutton(
             toggles_frame,
             text="Voice Triggers",
             variable=self.use_voice,
@@ -4270,22 +4248,22 @@ class iRacingControlApp:
             command=self.on_voice_toggle
         ).pack(side="left", padx=4)
 
-        ttk.Button(
+        tk.Button(
             toggles_frame,
             text="Test Voice",
             command=self.open_voice_test_dialog,
-            state=("normal" if HAS_SPEECH else "disabled"),
-            bootstyle="info"
+            state=("normal" if HAS_SPEECH else "disabled")
         ).pack(side="left", padx=4)
 
         if not HAS_SPEECH:
-            ttk.Label(
+            tk.Label(
                 toggles_frame,
                 text="(Install 'speech_recognition' for voice)",
-                bootstyle="secondary"
+                fg="gray",
+                font=("Arial", 8)
             ).pack(side="left", padx=4)
 
-        engine_frame = ttk.LabelFrame(parent, text="Recognition Engine")
+        engine_frame = tk.LabelFrame(parent, text="Recognition Engine")
         engine_frame.pack(fill="x", padx=2, pady=6)
 
         ttk.Label(engine_frame, text="Voice Engine:").pack(side="left", padx=4)
@@ -4307,46 +4285,43 @@ class iRacingControlApp:
         )
         self.voice_engine_combo.pack(side="left", padx=4)
 
-        self.btn_vosk_model = ttk.Button(
+        self.btn_vosk_model = tk.Button(
             engine_frame,
             text="Select Vosk Model...",
-            command=self.choose_vosk_model,
-            bootstyle="secondary"
+            command=self.choose_vosk_model
         )
         self.btn_vosk_model.pack(side="left", padx=4)
 
-        self.btn_whisper_binary = ttk.Button(
+        self.btn_whisper_binary = tk.Button(
             engine_frame,
             text="Select whisper.cpp...",
-            command=self.choose_whisper_binary,
-            bootstyle="secondary"
+            command=self.choose_whisper_binary
         )
         self.btn_whisper_binary.pack(side="left", padx=4)
 
-        self.btn_whisper_model = ttk.Button(
+        self.btn_whisper_model = tk.Button(
             engine_frame,
             text="Select Whisper Model...",
-            command=self.choose_whisper_model,
-            bootstyle="secondary"
+            command=self.choose_whisper_model
         )
         self.btn_whisper_model.pack(side="left", padx=4)
 
-        ttk.Label(
+        tk.Label(
             engine_frame,
             textvariable=self.vosk_status_var,
-            bootstyle="secondary"
+            fg="gray"
         ).pack(side="left", padx=6)
 
-        ttk.Label(
+        tk.Label(
             engine_frame,
             textvariable=self.whisper_status_var,
-            bootstyle="secondary"
+            fg="gray"
         ).pack(side="left", padx=6)
 
-        device_frame = ttk.LabelFrame(parent, text="Input/Output Devices")
+        device_frame = tk.LabelFrame(parent, text="Input/Output Devices")
         device_frame.pack(fill="x", padx=2, pady=6)
 
-        mic_row = ttk.Frame(device_frame)
+        mic_row = tk.Frame(device_frame)
         mic_row.pack(fill="x", padx=6, pady=2)
 
         ttk.Label(mic_row, text="Microphone:").pack(side="left")
@@ -4354,7 +4329,7 @@ class iRacingControlApp:
         self.mic_combo.pack(side="left", padx=4, fill="x", expand=True)
         self.mic_combo.bind("<<ComboboxSelected>>", self._on_microphone_selected)
 
-        out_row = ttk.Frame(device_frame)
+        out_row = tk.Frame(device_frame)
         out_row.pack(fill="x", padx=6, pady=2)
 
         ttk.Label(out_row, text="Audio Output (TTS):").pack(side="left")
@@ -4362,20 +4337,19 @@ class iRacingControlApp:
         self.audio_output_combo.pack(side="left", padx=4, fill="x", expand=True)
         self.audio_output_combo.bind("<<ComboboxSelected>>", self._on_output_selected)
 
-        ttk.Button(
+        tk.Button(
             device_frame,
             text="Refresh devices",
-            command=self._refresh_audio_device_lists,
-            bootstyle="secondary"
+            command=self._refresh_audio_device_lists
         ).pack(anchor="e", padx=6, pady=4)
 
-        tuning_frame = ttk.LabelFrame(
+        tuning_frame = tk.LabelFrame(
             parent,
             text="Voice Tuning (accuracy and speed)"
         )
         tuning_frame.pack(fill="x", padx=2, pady=(6, 4))
 
-        tuning_row_1 = ttk.Frame(tuning_frame)
+        tuning_row_1 = tk.Frame(tuning_frame)
         tuning_row_1.pack(fill="x", padx=6, pady=2)
 
         ttk.Label(tuning_row_1, text="Ambient noise (s):").pack(side="left")
@@ -4398,13 +4372,13 @@ class iRacingControlApp:
             textvariable=self.voice_phrase_time_limit
         ).pack(side="left", padx=4)
 
-        ttk.Checkbutton(
+        tk.Checkbutton(
             tuning_row_1,
             text="Dynamic energy (auto)",
             variable=self.voice_dynamic_energy
         ).pack(side="left", padx=8)
 
-        tuning_row_2 = ttk.Frame(tuning_frame)
+        tuning_row_2 = tk.Frame(tuning_frame)
         tuning_row_2.pack(fill="x", padx=6, pady=2)
 
         ttk.Label(tuning_row_2, text="Initial timeout (s):").pack(side="left")
@@ -4433,10 +4407,11 @@ class iRacingControlApp:
             width=8,
             textvariable=self.voice_energy_threshold
         ).pack(side="left", padx=4)
-        ttk.Label(
+        tk.Label(
             tuning_row_2,
             text="(blank = automatic)",
-            bootstyle="secondary"
+            fg="gray",
+            font=("Arial", 8)
         ).pack(side="left", padx=2)
 
         if not self._voice_traces_attached:
@@ -4462,7 +4437,7 @@ class iRacingControlApp:
             self.app_state = "CONFIG"
             self.btn_mode.config(
                 text="Mode: CONFIG (Click to Save & Run)",
-                bootstyle="warning"
+                bg="orange"
             )
             input_manager.active = False
             self._clear_keyboard_hotkeys()
@@ -4470,7 +4445,7 @@ class iRacingControlApp:
         else:
             # Switch to RUNNING
             self.app_state = "RUNNING"
-            self.btn_mode.config(text="Mode: RUNNING", bootstyle="success")
+            self.btn_mode.config(text="Mode: RUNNING", bg="#90ee90")
             input_manager.active = True
             self.register_current_listeners()
 
@@ -4491,15 +4466,15 @@ class iRacingControlApp:
             return
 
         if self.clear_target_bind:
-            bootstyle = "success" if "JOY" in self.clear_target_bind else "info"
+            bg_color = "#90ee90" if "JOY" in self.clear_target_bind else "#ADD8E6"
             self.btn_clear_target_bind.config(
                 text=self.clear_target_bind,
-                bootstyle=bootstyle
+                bg=bg_color
             )
         else:
             self.btn_clear_target_bind.config(
                 text="Set Clear Hotkey",
-                bootstyle="secondary"
+                bg="#f0f0f0"
             )
 
     def _refresh_manual_rescan_bind_button(self):
@@ -4508,15 +4483,15 @@ class iRacingControlApp:
             return
 
         if self.manual_rescan_bind:
-            bootstyle = "success" if "JOY" in self.manual_rescan_bind else "info"
+            bg_color = "#90ee90" if "JOY" in self.manual_rescan_bind else "#ADD8E6"
             self.btn_manual_rescan_bind.config(
                 text=self.manual_rescan_bind,
-                bootstyle=bootstyle
+                bg=bg_color
             )
         else:
             self.btn_manual_rescan_bind.config(
                 text="Set Rescan Hotkey",
-                bootstyle="secondary"
+                bg="#f0f0f0"
             )
 
     def _set_clear_target_bind(self):
@@ -4527,7 +4502,7 @@ class iRacingControlApp:
 
         self.focus_window()
         if self.btn_clear_target_bind:
-            self.btn_clear_target_bind.config(text="...", bootstyle="warning")
+            self.btn_clear_target_bind.config(text="...", bg="yellow")
         self.root.update_idletasks()
 
         code = input_manager.capture_any_input()
@@ -4556,7 +4531,7 @@ class iRacingControlApp:
 
         self.focus_window()
         if self.btn_manual_rescan_bind:
-            self.btn_manual_rescan_bind.config(text="...", bootstyle="warning")
+            self.btn_manual_rescan_bind.config(text="...", bg="yellow")
         self.root.update_idletasks()
 
         code = input_manager.capture_any_input()
@@ -6215,8 +6190,7 @@ class iRacingControlApp:
 def main():
     """Main application entry point."""
     try:
-        root = ttk.Window(themename=UI_THEME["name"])
-        apply_app_theme(root)
+        root = tk.Tk()
         iRacingControlApp(root)
         root.mainloop()
     except Exception as e:

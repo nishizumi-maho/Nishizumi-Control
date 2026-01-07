@@ -16,6 +16,7 @@ Version: 5.0.0
 
 import tkinter as tk
 from tkinter import ttk, messagebox, colorchooser, filedialog
+import ttkbootstrap as ttkb
 import time
 import ctypes
 import keyboard
@@ -253,6 +254,45 @@ def apply_app_icon(root: tk.Tk) -> None:
             return
         except Exception as exc:  # noqa: PERF203
             print(f"[ICON] Failed to load {icon_path}: {exc}")
+
+
+def apply_modern_theme(root: tk.Tk, style: ttkb.Style) -> None:
+    """Apply a modern, high-contrast theme for improved readability."""
+    colors = style.colors
+    base_font = ("Segoe UI", 10)
+    heading_font = ("Segoe UI Semibold", 10)
+
+    root.configure(bg=colors.bg)
+    root.option_add("*Font", base_font)
+    root.option_add("*Label.Font", base_font)
+    root.option_add("*Button.Font", base_font)
+    root.option_add("*Checkbutton.Font", base_font)
+    root.option_add("*Radiobutton.Font", base_font)
+    root.option_add("*Entry.Font", base_font)
+    root.option_add("*Label.Background", colors.bg)
+    root.option_add("*Frame.Background", colors.bg)
+    root.option_add("*Labelframe.Background", colors.bg)
+    root.option_add("*Labelframe.LabelBackground", colors.bg)
+    root.option_add("*Label.Foreground", colors.fg)
+    root.option_add("*Button.Background", colors.primary)
+    root.option_add("*Button.Foreground", colors.selectfg)
+    root.option_add("*Checkbutton.Background", colors.bg)
+    root.option_add("*Checkbutton.Foreground", colors.fg)
+    root.option_add("*Radiobutton.Background", colors.bg)
+    root.option_add("*Radiobutton.Foreground", colors.fg)
+    root.option_add("*Entry.Background", colors.inputbg)
+    root.option_add("*Entry.Foreground", colors.inputfg)
+    root.option_add("*Entry.InsertBackground", colors.inputfg)
+
+    style.configure("TLabel", font=base_font)
+    style.configure("TButton", font=base_font, padding=6)
+    style.configure("TCheckbutton", font=base_font)
+    style.configure("TRadiobutton", font=base_font)
+    style.configure("TEntry", font=base_font)
+    style.configure("TCombobox", font=base_font)
+    style.configure("TSpinbox", font=base_font)
+    style.configure("TNotebook.Tab", padding=(12, 6))
+    style.configure("TLabelframe.Label", font=heading_font)
 
 
 # Overlay feedback defaults (per-car thresholds)
@@ -3699,6 +3739,8 @@ class iRacingControlApp:
 
     def __init__(self, root: tk.Tk):
         self.root = root
+        self.style = ttkb.Style()
+        apply_modern_theme(self.root, self.style)
         self.root.title(f"{APP_NAME} v{APP_VERSION}")
         self.root.geometry("820x900")
         apply_app_icon(self.root)
@@ -6344,7 +6386,7 @@ class iRacingControlApp:
 def main():
     """Main application entry point."""
     try:
-        root = tk.Tk()
+        root = ttkb.Window(themename="flatly")
         iRacingControlApp(root)
         root.mainloop()
     except Exception as e:

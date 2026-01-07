@@ -5539,6 +5539,9 @@ class iRacingControlApp:
                 return {"status": "unavailable"}
 
             found_vars = []
+            forced_float_vars = {
+                "dcBrakeBias",
+            }
 
             # Base candidates
             candidates = [
@@ -5592,7 +5595,7 @@ class iRacingControlApp:
                     if not isinstance(value, numbers.Real):
                         continue
 
-                    is_float = (float(value) % 1.0) != 0.0
+                    is_float = candidate in forced_float_vars or (float(value) % 1.0) != 0.0
                     found_vars.append((candidate, is_float))
 
             except Exception as e:

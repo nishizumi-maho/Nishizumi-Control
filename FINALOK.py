@@ -3555,6 +3555,7 @@ class iRacingControlApp:
         self.root.title(f"{APP_NAME} v{APP_VERSION}")
         self.root.geometry("820x900")
         apply_app_icon(self.root)
+        self._configure_styles()
 
         # Thread-safe UI queue
         self._uiq: "queue.Queue[Tuple[Callable, tuple, dict]]" = queue.Queue()
@@ -3571,6 +3572,7 @@ class iRacingControlApp:
         self.combo_tab: Optional[ComboTab] = None
         self.overlay_tab: Optional[OverlayConfigTab] = None
         self.voice_window: Optional[tk.Toplevel] = None
+        self.automation_window: Optional[tk.Toplevel] = None
 
         # Presets: saved_presets[car][track] = config
         self.saved_presets: Dict[str, Dict[str, Dict[str, Any]]] = {}
@@ -3826,6 +3828,135 @@ class iRacingControlApp:
             command=self.restore_defaults
         )
 
+    def _configure_styles(self) -> None:
+        """Configure tab styling for clearer navigation."""
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+        style.configure(
+            "Main.TNotebook",
+            background="#1f2933",
+            borderwidth=0
+        )
+        style.configure(
+            "Main.TNotebook.Tab",
+            background="#d9e2ec",
+            foreground="#102a43",
+            padding=(12, 6),
+            font=("Arial", 10, "bold")
+        )
+        style.map(
+            "Main.TNotebook.Tab",
+            background=[("selected", "#4c6fff")],
+            foreground=[("selected", "#ffffff")]
+        )
+
+        style.configure(
+            "Controls.TNotebook",
+            background="#1f2933",
+            borderwidth=0
+        )
+        style.configure(
+            "Controls.TNotebook.Tab",
+            background="#e5e7eb",
+            foreground="#102a43",
+            padding=(10, 4),
+            font=("Arial", 9, "bold")
+        )
+        style.map(
+            "Controls.TNotebook.Tab",
+            background=[("selected", "#10b981")],
+            foreground=[("selected", "#ffffff")]
+        )
+
+    @staticmethod
+    def _apply_tab_palette(notebook: ttk.Notebook, palette: List[str]) -> None:
+        """Apply alternating colors to notebook tabs for faster scanning."""
+        for index, tab_id in enumerate(notebook.tabs()):
+            color = palette[index % len(palette)]
+            notebook.tab(tab_id, background=color, foreground="#0b0f14")
+
+    def _open_automation_settings(self) -> None:
+        """Show a condensed automation settings panel."""
+        if self.automation_window and self.automation_window.winfo_exists():
+            self.automation_window.lift()
+            self.automation_window.focus_force()
+            return
+
+        window = tk.Toplevel(self.root)
+        window.title("Automation & Shortcut Settings")
+        window.geometry("480x360")
+        window.transient(self.root)
+        window.grab_set()
+        window.configure(padx=12, pady=10)
+        self.automation_window = window
+
+        tk.Label(
+            window,
+            text="Automation & Shortcut Options",
+            font=("Arial", 12, "bold"),
+            fg="#1f2933"
+        ).pack(anchor="w", pady=(0, 6))
+
+        tk.Label(
+            window,
+            text="Toggle automation behaviors and scan helpers here.",
+            fg="#52606d"
+        ).pack(anchor="w", pady=(0, 10))
+
+        options_frame = tk.LabelFrame(
+            window,
+            text="Automation behavior",
+            padx=8,
+            pady=6
+        )
+        options_frame.pack(fill="both", expand=True)
+
+        tk.Checkbutton(
+            options_frame,
+            text="Restart before rescanning controls (after the first scan)",
+            variable=self.auto_restart_on_rescan,
+            command=self.schedule_save
+        ).pack(anchor="w", pady=2)
+
+        tk.Checkbutton(
+            options_frame,
+            text="Auto-restart and scan when joining a Race session",
+            variable=self.auto_restart_on_race,
+            command=self.schedule_save
+        ).pack(anchor="w", pady=2)
+
+        tk.Checkbutton(
+            options_frame,
+            text="Show scan completion popup",
+            variable=self.show_scan_popup,
+            command=self.schedule_save
+        ).pack(anchor="w", pady=2)
+
+        tk.Checkbutton(
+            options_frame,
+            text="Start with Windows",
+            variable=self.start_with_windows,
+            command=self._on_startup_toggle
+        ).pack(anchor="w", pady=2)
+
+        tk.Checkbutton(
+            options_frame,
+            text="Keep trying to reach hotkey targets (no timeout)",
+            variable=self.keep_trying_targets,
+            command=self.schedule_save
+        ).pack(anchor="w", pady=2)
+
+        tk.Button(
+            window,
+            text="Close",
+            command=window.destroy,
+            bg="#e2e8f0"
+        ).pack(anchor="e", pady=(10, 0))
+
     def _create_main_ui(self):
         """Create main user interface."""
         # Mode toggle button
@@ -3860,13 +3991,17 @@ class iRacingControlApp:
             justify="left"
         ).pack(fill="x", padx=8, pady=4)
 
-        main_tabs = ttk.Notebook(self.root)
+        main_tabs = ttk.Notebook(self.root, style="Main.TNotebook")
         main_tabs.pack(fill="both", expand=True, padx=10, pady=5)
 
         setup_tab = ttk.Frame(main_tabs)
         controls_tab = ttk.Frame(main_tabs)
         main_tabs.add(setup_tab, text="Setup")
         main_tabs.add(controls_tab, text="Controls")
+        self._apply_tab_palette(
+            main_tabs,
+            ["#d7e3fc", "#fde2e2"]
+        )
 
         setup_container = tk.Frame(setup_tab)
         setup_container.pack(fill="both", expand=True, padx=5, pady=5)
@@ -4019,43 +4154,24 @@ class iRacingControlApp:
         tk.Button(
             stability_frame,
             text="Voice/Audio Options",
-            command=self.open_voice_audio_settings
+            command=self.open_voice_audio_settings,
+            bg="#cfe8ff"
         ).pack(fill="x", padx=8, pady=(8, 6))
 
-        tk.Checkbutton(
+        tk.Label(
             stability_frame,
-            text="Restart before rescanning controls (after the first scan)",
-            variable=self.auto_restart_on_rescan,
-            command=self.schedule_save
-        ).pack(anchor="w", padx=8, pady=2)
+            text="Automation settings are grouped in a popup for quick access.",
+            fg="#52606d",
+            wraplength=220,
+            justify="left"
+        ).pack(fill="x", padx=8, pady=(0, 6))
 
-        tk.Checkbutton(
+        tk.Button(
             stability_frame,
-            text="Auto-restart and scan when joining a Race session",
-            variable=self.auto_restart_on_race,
-            command=self.schedule_save
-        ).pack(anchor="w", padx=8, pady=2)
-
-        tk.Checkbutton(
-            stability_frame,
-            text="Show scan completion popup",
-            variable=self.show_scan_popup,
-            command=self.schedule_save
-        ).pack(anchor="w", padx=8, pady=2)
-
-        tk.Checkbutton(
-            stability_frame,
-            text="Start with Windows",
-            variable=self.start_with_windows,
-            command=self._on_startup_toggle
-        ).pack(anchor="w", padx=8, pady=2)
-
-        tk.Checkbutton(
-            stability_frame,
-            text="Keep trying to reach hotkey targets (no timeout)",
-            variable=self.keep_trying_targets,
-            command=self.schedule_save
-        ).pack(anchor="w", padx=8, pady=2)
+            text="⚙ Open Automation Settings",
+            command=self._open_automation_settings,
+            bg="#ffe3b3"
+        ).pack(fill="x", padx=8, pady=(0, 10))
 
         clear_frame = tk.Frame(stability_frame)
         clear_frame.pack(fill="x", padx=8, pady=6)
@@ -4086,7 +4202,7 @@ class iRacingControlApp:
         self.btn_manual_rescan_bind.pack(side="left", padx=6)
 
         # Main notebook
-        self.notebook = ttk.Notebook(controls_tab)
+        self.notebook = ttk.Notebook(controls_tab, style="Controls.TNotebook")
         self.notebook.pack(fill="both", expand=True, padx=5, pady=5)
 
         # Initialize with default variables if none exist
@@ -5364,6 +5480,11 @@ class iRacingControlApp:
             car,
             self.active_vars,
             self.car_overlay_config[car]
+        )
+
+        self._apply_tab_palette(
+            self.notebook,
+            ["#e0f2fe", "#e8f5e9", "#fff4e6", "#fce7f3", "#ede9fe"]
         )
 
         # Set editing state

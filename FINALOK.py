@@ -268,7 +268,7 @@ DEFAULT_OVERLAY_FEEDBACK = {
 
 # Timing profiles for input simulation (click-click timing)
 GLOBAL_TIMING = {
-    "profile": "aggressive",  # "aggressive", "casual", "relaxed", "custom", "bot", "bot_safe"
+    "profile": "bot",  # "aggressive", "casual", "relaxed", "custom", "bot", "bot_safe"
     # Custom profile settings:
     "press_min_ms": 60,
     "press_max_ms": 80,
@@ -3806,7 +3806,7 @@ class iRacingControlApp:
         self.keep_trying_targets = tk.BooleanVar(value=True)
         self.show_scan_popup = tk.BooleanVar(value=False)
         self.auto_save_presets = tk.BooleanVar(value=True)
-        self.lock_preset_selection = tk.BooleanVar(value=False)
+        self.lock_preset_selection = tk.BooleanVar(value=True)
         self.start_with_windows = tk.BooleanVar(value=False)
         self.clear_target_bind: Optional[str] = None
         self.btn_clear_target_bind: Optional[tk.Button] = None
@@ -5907,7 +5907,7 @@ class iRacingControlApp:
         self.auto_restart_on_rescan.set(data.get("auto_restart_on_rescan", True))
         self.auto_restart_on_race.set(data.get("auto_restart_on_race", True))
         self.auto_save_presets.set(data.get("auto_save_presets", True))
-        self.lock_preset_selection.set(data.get("lock_preset_selection", False))
+        self.lock_preset_selection.set(data.get("lock_preset_selection", True))
         self.start_with_windows.set(data.get("start_with_windows", False))
         self.keep_trying_targets.set(data.get("keep_trying_targets", True))
         self.show_scan_popup.set(data.get("show_scan_popup", False))

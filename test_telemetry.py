@@ -1,3 +1,4 @@
+#Useful CMD to test the telemetry output in a live session#
 import numbers
 import sys
 import time

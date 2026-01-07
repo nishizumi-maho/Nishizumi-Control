@@ -900,7 +900,7 @@ class InputManager:
 
     def connect_allowed_devices(self, allowed_names: List[str]):
         """
-        Connect all available devices.
+        Connect only devices in the allowed list.
         
         Args:
             allowed_names: List of device names to allow
@@ -917,14 +917,19 @@ class InputManager:
             if not pygame.joystick.get_init():
                 pygame.joystick.init()
 
+            if not self.allowed_devices:
+                # No devices have been approved yet
+                return
+
             for i in range(pygame.joystick.get_count()):
                 j = pygame.joystick.Joystick(i)
-                try:
-                    j.init()
-                    self.joysticks.append(j)
-                    print(f"[InputManager] Connected: {j.get_name()}")
-                except Exception:
-                    pass
+                if j.get_name() in self.allowed_devices:
+                    try:
+                        j.init()
+                        self.joysticks.append(j)
+                        print(f"[InputManager] Connected: {j.get_name()}")
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -1701,8 +1706,11 @@ class DeviceSelector(tk.Toplevel):
 
         for idx, name in all_devices:
             var = tk.BooleanVar()
-            # Default to nothing selected
-            var.set(False)
+            if current_allowed:
+                var.set(name in current_allowed)
+            else:
+                # First run defaults to nothing selected
+                var.set(False)
 
             chk = tk.Checkbutton(
                 self.frame_list, 

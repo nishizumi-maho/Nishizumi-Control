@@ -3839,12 +3839,14 @@ class iRacingControlApp:
         self._auto_save_job: Optional[str] = None
         self.getting_started_window: Optional[tk.Toplevel] = None
         self.getting_started_text = (
-            "Follow the steps below in order: 1) pick your car and track, "
-            "2) confirm your input devices, then 3) scan driver controls. "
-            "If the car/track selectors are greyed out, iRacing will auto-handle them "
-            "when you enter a session. Join an iRacing session first to work with "
-            "presets, or disable the “lock car/track selection” checkbox in the Options "
-            "tab. Use CONFIG mode when changing bindings and RUNNING mode when driving."
+            "Quick start checklist\n"
+            "1) Choose your car and track.\n"
+            "2) Confirm your input devices.\n"
+            "3) Scan driver controls.\n\n"
+            "If the car/track selectors are greyed out, iRacing will auto-manage "
+            "them when you enter a session. Join a session first to work with "
+            "presets, or disable “Lock car/track selection” in the Options tab.\n\n"
+            "Use CONFIG mode when changing bindings and RUNNING mode when driving."
         )
 
         # Load configuration

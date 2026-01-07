@@ -4429,13 +4429,21 @@ class iRacingControlApp:
         self.voice_window.protocol("WM_DELETE_WINDOW", _cleanup)
 
         notebook = ttk.Notebook(self.voice_window)
-        notebook.pack(fill="both", expand=True, padx=10, pady=10)
+        notebook.pack(fill="both", expand=True, padx=10, pady=(10, 4))
 
         voice_tab = ttk.Frame(notebook)
         notebook.add(voice_tab, text="Voice/Audio")
         self._build_voice_audio_tab(voice_tab)
 
         notebook.select(voice_tab)
+
+        tk.Button(
+            self.voice_window,
+            text="💾 SAVE",
+            command=self.schedule_save,
+            bg="#90ee90",
+            height=2
+        ).pack(fill="x", padx=10, pady=(4, 10))
 
     def _build_voice_audio_tab(self, parent: tk.Widget):
         """Construct the tab containing voice and audio controls."""
@@ -4477,10 +4485,13 @@ class iRacingControlApp:
         engine_frame = tk.LabelFrame(parent, text="Recognition Engine")
         engine_frame.pack(fill="x", padx=2, pady=6)
 
-        ttk.Label(engine_frame, text="Voice Engine:").pack(side="left", padx=4)
+        engine_row = tk.Frame(engine_frame)
+        engine_row.pack(fill="x", padx=6, pady=2)
+
+        ttk.Label(engine_row, text="Voice Engine:").pack(side="left", padx=4)
         engine_options = ["speech"] + (["vosk"] if HAS_VOSK else []) + ["whisper.cpp"]
         self.voice_engine_combo = ttk.Combobox(
-            engine_frame,
+            engine_row,
             values=engine_options,
             state="readonly",
             width=12
@@ -4496,38 +4507,50 @@ class iRacingControlApp:
         )
         self.voice_engine_combo.pack(side="left", padx=4)
 
+        model_row = tk.Frame(engine_frame)
+        model_row.pack(fill="x", padx=6, pady=2)
+
         self.btn_vosk_model = tk.Button(
-            engine_frame,
+            model_row,
             text="Select Vosk Model...",
             command=self.choose_vosk_model
         )
         self.btn_vosk_model.pack(side="left", padx=4)
 
         self.btn_whisper_binary = tk.Button(
-            engine_frame,
+            model_row,
             text="Select whisper.cpp...",
             command=self.choose_whisper_binary
         )
         self.btn_whisper_binary.pack(side="left", padx=4)
 
         self.btn_whisper_model = tk.Button(
-            engine_frame,
+            model_row,
             text="Select Whisper Model...",
             command=self.choose_whisper_model
         )
         self.btn_whisper_model.pack(side="left", padx=4)
 
-        tk.Label(
-            engine_frame,
-            textvariable=self.vosk_status_var,
-            fg="gray"
-        ).pack(side="left", padx=6)
+        status_row = tk.Frame(engine_frame)
+        status_row.pack(fill="x", padx=6, pady=2)
 
         tk.Label(
-            engine_frame,
+            status_row,
+            textvariable=self.vosk_status_var,
+            fg="gray",
+            anchor="w",
+            justify="left",
+            wraplength=280
+        ).pack(side="left", padx=6, fill="x", expand=True)
+
+        tk.Label(
+            status_row,
             textvariable=self.whisper_status_var,
-            fg="gray"
-        ).pack(side="left", padx=6)
+            fg="gray",
+            anchor="w",
+            justify="left",
+            wraplength=280
+        ).pack(side="left", padx=6, fill="x", expand=True)
 
         device_frame = tk.LabelFrame(parent, text="Input/Output Devices")
         device_frame.pack(fill="x", padx=2, pady=6)
@@ -6065,7 +6088,11 @@ class iRacingControlApp:
     def _format_vosk_status(self) -> str:
         """Return a user-friendly status string for Vosk usage."""
         engine = self.voice_engine.get()
+        model_path = self.vosk_model_path.get()
+        model_name = os.path.basename(model_path.rstrip(os.sep)) if model_path else ""
         if engine != "vosk":
+            if model_path:
+                return f"Vosk model selected: {model_name or model_path}"
             return "Using Windows speech recognizer"
 
         if not HAS_VOSK:
@@ -6073,7 +6100,6 @@ class iRacingControlApp:
                 return f"Vosk unavailable: {VOSK_IMPORT_ERROR}"
             return "Vosk not installed"
 
-        model_path = self.vosk_model_path.get()
         if not model_path:
             return "Select a Vosk model folder"
 
@@ -6081,26 +6107,36 @@ class iRacingControlApp:
             return f"Model error: {voice_listener._vosk_error}"
 
         if voice_listener.vosk_model is not None:
-            name = os.path.basename(model_path.rstrip(os.sep)) or model_path
-            return f"Vosk model: {name}"
+            name = model_name or model_path
+            return f"Vosk ready: {name}"
 
-        return "Loading Vosk model..."
+        return f"Vosk model selected: {model_name or model_path}"
 
     def _format_whisper_status(self) -> str:
         """Return a status string for whisper.cpp usage."""
 
         engine = self.voice_engine.get()
         if engine != "whisper.cpp":
+            if self.whisper_binary_path.get() or self.whisper_model_path.get():
+                return self._format_whisper_status_details()
             return ""
 
+        return self._format_whisper_status_details()
+
+    def _format_whisper_status_details(self) -> str:
+        """Return detailed whisper.cpp selection status."""
         if not self.whisper_binary_path.get():
+            if self.whisper_model_path.get():
+                model_name = os.path.basename(self.whisper_model_path.get())
+                return f"Whisper model selected: {model_name}"
             return "Select whisper.cpp executable"
 
         if not os.path.exists(self.whisper_binary_path.get()):
             return "Executable not found"
 
         if not self.whisper_model_path.get():
-            return "Select a .bin/.gguf model"
+            exe_name = os.path.basename(self.whisper_binary_path.get())
+            return f"whisper.cpp selected: {exe_name} (choose model)"
 
         if not os.path.exists(self.whisper_model_path.get()):
             return "Model not found"
@@ -6110,7 +6146,7 @@ class iRacingControlApp:
 
         model_name = os.path.basename(self.whisper_model_path.get())
         exe_name = os.path.basename(self.whisper_binary_path.get())
-        return f"{exe_name} | {model_name}"
+        return f"Whisper ready: {exe_name} | {model_name}"
 
     def on_voice_engine_changed(self):
         """Handle engine dropdown changes."""
@@ -6136,6 +6172,7 @@ class iRacingControlApp:
         self.vosk_model_path.set(path)
         self._update_voice_controls()
         self.register_current_listeners()
+        self.schedule_save()
 
     def choose_whisper_binary(self):
         """Prompt the user to select the whisper.cpp executable."""

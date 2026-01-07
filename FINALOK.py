@@ -2418,8 +2418,7 @@ class GenericController:
         if not self.is_float:
             return target
 
-        step = self._detect_float_step()
-        self._float_step = step
+        step = self._float_step
         current = self.read_telemetry()
 
         if step is None or step <= 0 or current is None:
@@ -2490,6 +2489,7 @@ class GenericController:
         cleared = False
         success = False
         last_diff: Optional[float] = None
+        last_value: Optional[float] = None
         timing_profile = _normalize_timing_config(GLOBAL_TIMING).get("profile", "aggressive")
         is_bot_profile = timing_profile in {"bot", "bot_safe"}
         is_bot_safe = timing_profile == "bot_safe"
@@ -2539,6 +2539,12 @@ class GenericController:
                 if current is None:
                     time.sleep(0.05)
                     continue
+
+                if self.is_float and last_value is not None:
+                    delta = abs(float(current) - float(last_value))
+                    if delta >= 1e-4:
+                        if self._float_step is None or delta < self._float_step:
+                            self._float_step = round(delta, 6)
 
                 if active_target is None:
                     time.sleep(0.05)
@@ -2592,6 +2598,7 @@ class GenericController:
                     click_pulse(key, self.is_float)
                     time.sleep(0.02)
                 last_diff = diff
+                last_value = current
 
         except Exception as exc:
             print(f"[GenericController] Exception: {exc}")

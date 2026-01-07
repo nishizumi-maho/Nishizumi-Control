@@ -3611,6 +3611,12 @@ class GlobalTimingWindow(tk.Toplevel):
             height=2
         ).pack(fill="x", padx=10, pady=10)
 
+        self.update_idletasks()
+        min_width = max(420, self.winfo_reqwidth())
+        min_height = self.winfo_reqheight()
+        self.minsize(min_width, min_height)
+        self.geometry(f"{min_width}x{min_height}")
+
         self._on_profile_change()
         self._profile_initialized = True
 

@@ -553,8 +553,8 @@ def _compute_timing(is_float: bool = False) -> Tuple[float, float]:
         press_ms = 150
         interval_ms = 200
     elif profile == "bot":
-        press_ms = 20
-        interval_ms = 10
+        press_ms = 1
+        interval_ms = 1
     else:  # custom
         p_min = timing_cfg.get("press_min_ms", 60)
         p_max = timing_cfg.get("press_max_ms", 80)

@@ -2,7 +2,7 @@
 
 ## General
 **What is Dominant Control?**  
-An accessibility-focused control manager for iRacing that maps driver-adjustable controls to keyboard/controller inputs, adds HUD overlays, presets, combo macros, TTS feedback, and offline Vosk voice commands.
+An accessibility-focused control manager for iRacing that maps driver-adjustable controls to keyboard/controller inputs, adds HUD overlays, presets, combo macros, TTS feedback, and offline voice commands via Vosk or whisper.cpp.
 
 **Who should use it?**  
 - Drivers with mobility limitations or restricted reach.  
@@ -58,12 +58,13 @@ Turn on TTS in settings. If PyAudio is installed you can choose an output device
 4) Enable **Voice Commands** and test phrases like “Brake bias up” or “Traction control preset two.”
 5) For noisy rooms, use push-to-talk or a smaller model to reduce false triggers.
 
-**How do I use Whisper instead of Vosk?**
-1) Ensure `faster-whisper` is installed (bundled in `requirements.txt`).
-2) Download a CTranslate2 Whisper model from the [Hugging Face faster-whisper collection](https://huggingface.co/collections/Systran/faster-whisper-655b5dd2959f16f30bdd5e23) (e.g., tiny/base/small for CPU; medium/large-v2 if you have GPU headroom).
-3) Extract the model folder so it contains `model.bin` and tokenizer files (e.g., `C:\whisper\faster-whisper-small`).
-4) In the app, pick **Whisper** as the voice engine, click **Select Whisper model folder**, and point to the extracted directory.
-5) Enable **Voice Commands** and test your phrases. If recognition lags, switch to a smaller model or place the model on a faster drive.
+**How do I use whisper.cpp instead of Vosk?**
+1) Download a whisper.cpp build for Windows and a compatible GGML/GGUF model.
+2) Place the executable and model file somewhere stable (e.g., `C:\whisper\`).
+3) In **Options → Voice/Audio Settings**, pick **whisper.cpp** as the voice engine.
+4) Click **Select whisper.cpp...** and choose the executable.
+5) Click **Select Whisper Model...** and choose the `.bin` or `.gguf` model file.
+6) Enable **Voice Commands** and test your phrases. If recognition lags, try a smaller model.
 
 ## Troubleshooting
 **The app can’t connect to iRacing.**  

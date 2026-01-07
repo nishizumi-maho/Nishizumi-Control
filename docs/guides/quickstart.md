@@ -1,4 +1,4 @@
-# Quick Start Guide (v3.0.0)
+# Quick Start Guide (v5.0.0)
 
 Get running in minutes with Dominant Control.
 
@@ -15,7 +15,7 @@ Get running in minutes with Dominant Control.
 
 ### From Source
 1. `python -m pip install -r requirements.txt`
-2. `python main.py`
+2. `python FINALOK.py`
 
 ## 2) Connect to iRacing
 1. Start iRacing and enter a **private practice session**.
@@ -24,7 +24,7 @@ Get running in minutes with Dominant Control.
 
 ## 3) Scan & Configure
 1. In the app, switch to **CONFIG** mode (button in the title bar).
-2. Click **🔍 Scan Driver Controls** to populate tabs (BrakeBias, TC, ABS, ARB, etc.).
+2. Follow the guided steps in **Step 1–3** to pick car/track, confirm devices, and scan controls.
 3. For each tab:
    - Click **Set Increase (+)** and press your desired key/button.
    - Click **Set Decrease (-)** and press your desired key/button.
@@ -32,7 +32,7 @@ Get running in minutes with Dominant Control.
    - Toggle HUD visibility for that variable if desired.
 
 ## 4) HUD / Overlay Setup
-1. Open the **HUD / Overlay** tab.
+1. Open the **HUD / Overlay** tab inside the control notebook.
 2. Check the variables you want visible.
 3. Adjust font size, colors, and opacity; drag the overlay into place.
 4. Click **Apply Style** to save per-car settings.
@@ -42,12 +42,17 @@ Get running in minutes with Dominant Control.
 - **Timing Profiles:** pick Aggressive / Casual / Relaxed or create a **Custom** profile if adjustments fire too slowly/quickly.
 
 ## 6) Voice & Audio Feedback
+- Open **Options → Voice/Audio Settings** to configure engines, devices, and tuning.
 - **Text-to-Speech:** enable in settings for spoken confirmations; choose an output device if PyAudio is available.
 - **Vosk Voice Commands:**
   1. Download a Vosk English model and note its folder path.
-  2. Set the **Vosk model path** in settings and enable **Voice Commands**.
+  2. Set the **Vosk model path** and enable **Voice Commands**.
   3. Test phrases like “Brake bias up” or “Traction control preset two.”
   4. Use a push-to-talk key if your room is noisy.
+- **whisper.cpp (offline):**
+  1. Download a whisper.cpp build and a GGML/GGUF model file.
+  2. Select the whisper.cpp executable and model in **Voice/Audio Settings**.
+  3. Enable **Voice Commands** and test your phrases.
 
 ## 7) Save & Run
 1. Enter car and track names, then click **Save Current**.

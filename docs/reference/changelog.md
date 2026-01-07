@@ -2,6 +2,16 @@
 
 All notable changes to Dominant Control for iRacing.
 
+## [5.0.0] - 2025-02-18
+### Added
+- Main/Options tab layout with a guided Step 1–3 setup flow.
+- Voice & audio settings window with engine selection, device routing, and tuning.
+- Manual rescan and clear-target hotkeys plus expanded automation toggles.
+- Optional whisper.cpp offline recognition (local executable + GGML/GGUF models).
+
+### Changed
+- Documentation updated to reflect the new layout and voice/audio workflow.
+
 ## [3.0.0] - 2025-02-15
 ### Added
 - Offline voice command pipeline using Vosk (downloadable models, configurable path, push-to-talk friendly).

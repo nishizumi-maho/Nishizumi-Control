@@ -33,7 +33,7 @@ import numbers
 from array import array
 import tempfile
 import wave
-from typing import Dict, List, Tuple, Optional, Any, Callable
+from typing import Dict, List, Tuple, Optional, Any, Callable, Set
 
 # ======================================================================
 # WATCHDOG UTILITY
@@ -866,7 +866,53 @@ class InputManager:
                 except Exception as e:
                     print(f"[InputManager] Error reactivating pygame: {e}")
 
-    def get_all_devices(self) -> List[Tuple[int, str]]:
+    def _scan_devices(self) -> List[Tuple[int, str]]:
+        devices: List[Tuple[int, str]] = []
+        count = pygame.joystick.get_count()
+
+        for i in range(count):
+            try:
+                j = pygame.joystick.Joystick(i)
+                if not j.get_init():
+                    j.init()
+                devices.append((i, j.get_name()))
+            except Exception:
+                devices.append((i, f"Device {i} (Error)"))
+
+        return devices
+
+    def _scan_devices_with_hidapi(self) -> List[Tuple[int, str]]:
+        env_keys = [
+            "SDL_HINT_JOYSTICK_HIDAPI",
+            "SDL_HINT_XINPUT_ENABLED",
+            "SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS",
+        ]
+        previous_env = {key: os.environ.get(key) for key in env_keys}
+
+        try:
+            os.environ["SDL_HINT_JOYSTICK_HIDAPI"] = "1"
+            os.environ["SDL_HINT_XINPUT_ENABLED"] = "1"
+            os.environ["SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
+            pygame.quit()
+            pygame.init()
+            pygame.joystick.init()
+            return self._scan_devices()
+        finally:
+            for key, value in previous_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            pygame.quit()
+            if not self.safe_mode:
+                if self.preserve_game_ffb:
+                    os.environ.setdefault("SDL_HINT_JOYSTICK_HIDAPI", "0")
+                    os.environ.setdefault("SDL_HINT_XINPUT_ENABLED", "0")
+                    os.environ.setdefault("SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
+                pygame.init()
+                pygame.joystick.init()
+
+    def get_all_devices(self, show_all: bool = False) -> List[Tuple[int, str]]:
         """
         Get all available joystick devices.
         
@@ -881,19 +927,9 @@ class InputManager:
                 pygame.init()
             if not pygame.joystick.get_init():
                 pygame.joystick.init()
-            devices = []
-            count = pygame.joystick.get_count()
-
-            for i in range(count):
-                try:
-                    j = pygame.joystick.Joystick(i)
-                    if not j.get_init():
-                        j.init()
-                    devices.append((i, j.get_name()))
-                except Exception:
-                    devices.append((i, f"Device {i} (Error)"))
-                    
-            return devices
+            if show_all and self.preserve_game_ffb:
+                return self._scan_devices_with_hidapi()
+            return self._scan_devices()
         except Exception as e:
             print(f"[InputManager] Error getting devices: {e}")
             return []
@@ -1684,6 +1720,7 @@ class DeviceSelector(tk.Toplevel):
         self.title("Manage USB Devices")
         self.geometry("450x400")
         self.callback = callback
+        self.current_allowed = list(current_allowed)
 
         tk.Label(
             self,
@@ -1698,28 +1735,19 @@ class DeviceSelector(tk.Toplevel):
             fg="gray"
         ).pack()
 
+        self.show_all_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            self,
+            text="Show all USB game controllers",
+            variable=self.show_all_var,
+            command=self._refresh_devices,
+        ).pack(anchor="w", padx=10)
+
         self.frame_list = tk.Frame(self)
         self.frame_list.pack(fill="both", expand=True, padx=10, pady=10)
 
         self.check_vars: Dict[str, tk.BooleanVar] = {}
-        all_devices = input_manager.get_all_devices()
-
-        for idx, name in all_devices:
-            var = tk.BooleanVar()
-            if current_allowed:
-                var.set(name in current_allowed)
-            else:
-                # First run defaults to nothing selected
-                var.set(False)
-
-            chk = tk.Checkbutton(
-                self.frame_list, 
-                text=name, 
-                variable=var, 
-                anchor="w"
-            )
-            chk.pack(fill="x")
-            self.check_vars[name] = var
+        self._populate_devices()
 
         tk.Button(
             self,
@@ -1728,6 +1756,31 @@ class DeviceSelector(tk.Toplevel):
             bg="#90ee90",
             height=2
         ).pack(fill="x", padx=10, pady=10)
+
+    def _populate_devices(self, selected_names: Optional[Set[str]] = None):
+        if selected_names is None:
+            selected_names = set(self.current_allowed)
+
+        for child in self.frame_list.winfo_children():
+            child.destroy()
+
+        self.check_vars.clear()
+        all_devices = input_manager.get_all_devices(show_all=self.show_all_var.get())
+
+        for idx, name in all_devices:
+            var = tk.BooleanVar(value=name in selected_names)
+            chk = tk.Checkbutton(
+                self.frame_list,
+                text=name,
+                variable=var,
+                anchor="w",
+            )
+            chk.pack(fill="x")
+            self.check_vars[name] = var
+
+    def _refresh_devices(self):
+        selected_names = {name for name, var in self.check_vars.items() if var.get()}
+        self._populate_devices(selected_names)
 
     def save(self):
         """Save device selection and close dialog."""

@@ -3072,72 +3072,67 @@ class ComboTab(tk.Frame):
         self.controllers = controllers_dict
         self.var_names = list(self.controllers.keys())
         self.preset_rows: List[Dict[str, Any]] = []
-        self._row_index = 0
 
         scroll_frame = ScrollableFrame(self)
         scroll_frame.pack(fill="both", expand=True)
         body = scroll_frame.inner
 
-        header_block = tk.Frame(body)
-        header_block.pack(fill="x", padx=8, pady=6)
+        tk.Label(
+            body,
+            text="⚡ Combo Adjustments (one trigger -> multiple variables)",
+            fg="orange",
+            font=("Arial", 10, "bold")
+        ).pack(pady=5)
+
+        # Header row
+        header = tk.Frame(body)
+        header.pack(fill="x", padx=5, pady=5)
 
         tk.Label(
-            header_block,
-            text="⚡ Combo Macros",
-            fg="#2c5aa0",
-            font=("Arial", 11, "bold")
-        ).pack(anchor="w")
+            header, 
+            text="Trigger", 
+            width=15, 
+            anchor="w", 
+            font=("Arial", 9, "bold")
+        ).pack(side="left", padx=2)
+
+        for var_name in self.var_names:
+            tk.Label(
+                header,
+                text=var_name.replace("dc", ""),
+                width=8,
+                font=("Arial", 8)
+            ).pack(side="left", padx=2)
 
         tk.Label(
-            header_block,
-            text="Build professional multi-variable macros with clear columns and consistent alignment.",
-            fg="gray",
-            font=("Arial", 9)
-        ).pack(anchor="w", pady=(2, 0))
+            header,
+            text="Voice trigger phrase",
+            width=18,
+            anchor="w",
+            font=("Arial", 8, "bold")
+        ).pack(side="left", padx=4)
 
-        ttk.Separator(body, orient="horizontal").pack(fill="x", padx=8, pady=4)
-
-        helper = tk.Label(
+        tk.Label(
             body,
             text=(
-                "Tip: Assign a bind for each combo row, then fill the columns with the values to send. "
-                "Optional voice trigger phrases are available in the last column."
+                "Optional voice trigger: type the exact phrase you will say to fire this combo. "
+                "Voice/Audio Settings live under Options → Voice/Audio Settings."
             ),
             fg="gray",
             font=("Arial", 8),
             wraplength=760,
             justify="left"
-        )
-        helper.pack(fill="x", padx=8, pady=(0, 6))
-
-        self.columns = [("bind", "Trigger", 16)]
-        self.columns.extend(
-            (var_name, var_name.replace("dc", ""), 9) for var_name in self.var_names
-        )
-        self.columns.append(("voice", "Voice trigger phrase", 26))
-        self.columns.append(("remove", "Remove", 8))
-
-        header = tk.Frame(body)
-        header.pack(fill="x", padx=8, pady=(2, 4))
-        for idx, (_key, label, width) in enumerate(self.columns):
-            ttk.Label(
-                header,
-                text=label,
-                width=width,
-                anchor=("w" if idx in (0, len(self.columns) - 2) else "center"),
-                font=("Arial", 9, "bold")
-            ).grid(row=0, column=idx, padx=3, sticky="w")
+        ).pack(fill="x", padx=5, pady=(0, 4))
 
         self.presets_container = tk.Frame(body)
-        self.presets_container.pack(fill="both", expand=True, padx=8, pady=4)
+        self.presets_container.pack(fill="both", expand=True, padx=5, pady=5)
 
         tk.Button(
             body,
-            text="Add Combo Row (+)",
+            text="Add Row (+)",
             command=self.add_dynamic_row,
-            bg="#eaf2ff",
-            font=("Arial", 9, "bold")
-        ).pack(fill="x", padx=8, pady=(4, 6))
+            bg="#f0f0f0"
+        ).pack(fill="x", padx=5, pady=(0, 5))
 
         # Add initial rows
         self.add_dynamic_row(is_reset=True)
@@ -3204,18 +3199,16 @@ class ComboTab(tk.Frame):
         is_reset: bool = False
     ):
         """Add a combo preset row."""
-        row_bg = "#fdf4e3" if is_reset else ("#f7f9fc" if self._row_index % 2 == 0 else "#ffffff")
-        frame = tk.Frame(self.presets_container, bg=row_bg)
+        frame = tk.Frame(self.presets_container)
         frame.pack(fill="x", pady=2)
 
         bind_button = tk.Button(
             frame,
             text="RESET" if is_reset else "Set Bind",
             width=15,
-            fg="red" if is_reset else "black",
-            bg="#fff0d6" if is_reset else "#f0f0f0"
+            fg="red" if is_reset else "black"
         )
-        bind_button.grid(row=0, column=0, padx=3, pady=2, sticky="w")
+        bind_button.pack(side="left", padx=2)
 
         row_data = {
             "frame": frame,
@@ -3227,9 +3220,9 @@ class ComboTab(tk.Frame):
         self._config_bind_button(bind_button, row_data)
 
         # Create entry for each variable
-        for idx, var_name in enumerate(self.var_names, start=1):
-            entry = ttk.Entry(frame, width=9, justify="center")
-            entry.grid(row=0, column=idx, padx=3, pady=2)
+        for var_name in self.var_names:
+            entry = ttk.Entry(frame, width=8)
+            entry.pack(side="left", padx=2)
             if self.app.app_state != "CONFIG":
                 entry.config(state="readonly")
             row_data["entries"][var_name] = entry
@@ -3237,21 +3230,13 @@ class ComboTab(tk.Frame):
 
         # Delete button (except for RESET)
         if not is_reset:
-            remove_btn = tk.Button(
+            tk.Button(
                 frame,
-                text="Remove",
-                fg="white",
-                bg="#c0392b",
+                text="X",
+                fg="red",
                 command=lambda r=row_data: self.remove_row(r),
-                width=8
-            )
-            remove_btn.grid(
-                row=0,
-                column=len(self.var_names) + 2,
-                padx=3,
-                pady=2,
-                sticky="w"
-            )
+                width=2
+            ).pack(side="left", padx=5)
 
         # Load existing data if provided
         if existing:
@@ -3271,14 +3256,8 @@ class ComboTab(tk.Frame):
                 )
                 bind_button.config(text=row_data["bind"], bg=bg_color)
 
-        voice_entry = ttk.Entry(frame, width=26)
-        voice_entry.grid(
-            row=0,
-            column=len(self.var_names) + 1,
-            padx=3,
-            pady=2,
-            sticky="w"
-        )
+        voice_entry = ttk.Entry(frame, width=18)
+        voice_entry.pack(side="left", padx=4)
         if existing and existing.get("voice_phrase"):
             voice_entry.insert(0, existing.get("voice_phrase", ""))
         if self.app.app_state != "CONFIG":
@@ -3286,7 +3265,6 @@ class ComboTab(tk.Frame):
         row_data["voice_entry"] = voice_entry
         self._bind_autosave_entry(voice_entry)
 
-        self._row_index += 1
         self.preset_rows.append(row_data)
 
     def remove_row(self, row_data: Dict[str, Any]):
@@ -3578,9 +3556,6 @@ class iRacingControlApp:
         self.root.geometry("820x900")
         apply_app_icon(self.root)
 
-        # UI styling
-        self._apply_theme()
-
         # Thread-safe UI queue
         self._uiq: "queue.Queue[Tuple[Callable, tuple, dict]]" = queue.Queue()
         self.root.after(30, self._drain_ui_queue)
@@ -3596,7 +3571,6 @@ class iRacingControlApp:
         self.combo_tab: Optional[ComboTab] = None
         self.overlay_tab: Optional[OverlayConfigTab] = None
         self.voice_window: Optional[tk.Toplevel] = None
-        self.automation_window: Optional[tk.Toplevel] = None
 
         # Presets: saved_presets[car][track] = config
         self.saved_presets: Dict[str, Dict[str, Dict[str, Any]]] = {}
@@ -3886,13 +3860,13 @@ class iRacingControlApp:
             justify="left"
         ).pack(fill="x", padx=8, pady=4)
 
-        main_tabs = ttk.Notebook(self.root, style="Main.TNotebook")
+        main_tabs = ttk.Notebook(self.root)
         main_tabs.pack(fill="both", expand=True, padx=10, pady=5)
 
         setup_tab = ttk.Frame(main_tabs)
         controls_tab = ttk.Frame(main_tabs)
-        main_tabs.add(setup_tab, text="🧭 Setup")
-        main_tabs.add(controls_tab, text="🎛 Controls")
+        main_tabs.add(setup_tab, text="Setup")
+        main_tabs.add(controls_tab, text="Controls")
 
         setup_container = tk.Frame(setup_tab)
         setup_container.pack(fill="both", expand=True, padx=5, pady=5)
@@ -4048,25 +4022,71 @@ class iRacingControlApp:
             command=self.open_voice_audio_settings
         ).pack(fill="x", padx=8, pady=(8, 6))
 
-        tk.Label(
+        tk.Checkbutton(
             stability_frame,
-            text="Condensed automation settings are available in a dedicated popup.",
-            fg="gray",
-            font=("Arial", 9),
-            wraplength=260,
-            justify="left"
-        ).pack(anchor="w", padx=8, pady=(0, 6))
+            text="Restart before rescanning controls (after the first scan)",
+            variable=self.auto_restart_on_rescan,
+            command=self.schedule_save
+        ).pack(anchor="w", padx=8, pady=2)
 
-        tk.Button(
+        tk.Checkbutton(
             stability_frame,
-            text="⚙ Open Automation Settings",
-            command=self.open_automation_settings,
-            bg="#eaf2ff",
-            font=("Arial", 9, "bold")
-        ).pack(fill="x", padx=8, pady=(0, 8))
+            text="Auto-restart and scan when joining a Race session",
+            variable=self.auto_restart_on_race,
+            command=self.schedule_save
+        ).pack(anchor="w", padx=8, pady=2)
+
+        tk.Checkbutton(
+            stability_frame,
+            text="Show scan completion popup",
+            variable=self.show_scan_popup,
+            command=self.schedule_save
+        ).pack(anchor="w", padx=8, pady=2)
+
+        tk.Checkbutton(
+            stability_frame,
+            text="Start with Windows",
+            variable=self.start_with_windows,
+            command=self._on_startup_toggle
+        ).pack(anchor="w", padx=8, pady=2)
+
+        tk.Checkbutton(
+            stability_frame,
+            text="Keep trying to reach hotkey targets (no timeout)",
+            variable=self.keep_trying_targets,
+            command=self.schedule_save
+        ).pack(anchor="w", padx=8, pady=2)
+
+        clear_frame = tk.Frame(stability_frame)
+        clear_frame.pack(fill="x", padx=8, pady=6)
+        tk.Label(
+            clear_frame,
+            text="Clear target hotkey (optional):"
+        ).pack(side="left")
+        self.btn_clear_target_bind = tk.Button(
+            clear_frame,
+            text="Set Clear Hotkey",
+            width=18,
+            command=self._set_clear_target_bind
+        )
+        self.btn_clear_target_bind.pack(side="left", padx=6)
+
+        rescan_frame = tk.Frame(stability_frame)
+        rescan_frame.pack(fill="x", padx=8, pady=(0, 8))
+        tk.Label(
+            rescan_frame,
+            text="Manual rescan hotkey (restart + scan + load preset):"
+        ).pack(side="left")
+        self.btn_manual_rescan_bind = tk.Button(
+            rescan_frame,
+            text="Set Rescan Hotkey",
+            width=18,
+            command=self._set_manual_rescan_bind
+        )
+        self.btn_manual_rescan_bind.pack(side="left", padx=6)
 
         # Main notebook
-        self.notebook = ttk.Notebook(controls_tab, style="Controls.TNotebook")
+        self.notebook = ttk.Notebook(controls_tab)
         self.notebook.pack(fill="both", expand=True, padx=5, pady=5)
 
         # Initialize with default variables if none exist
@@ -4075,143 +4095,6 @@ class iRacingControlApp:
 
         self.rebuild_tabs(self.active_vars)
         self.update_preset_ui()
-        self._refresh_clear_target_bind_button()
-        self._refresh_manual_rescan_bind_button()
-
-    def _apply_theme(self) -> None:
-        style = ttk.Style(self.root)
-        try:
-            style.theme_use("clam")
-        except Exception:
-            pass
-
-        style.configure(
-            "Main.TNotebook.Tab",
-            padding=(12, 6),
-            background="#d7e6f5"
-        )
-        style.map(
-            "Main.TNotebook.Tab",
-            background=[("selected", "#2c5aa0"), ("active", "#89b2d9")],
-            foreground=[("selected", "white"), ("active", "black")]
-        )
-
-        style.configure(
-            "Controls.TNotebook.Tab",
-            padding=(10, 5),
-            background="#e7eff8"
-        )
-        style.map(
-            "Controls.TNotebook.Tab",
-            background=[("selected", "#5f8fc9"), ("active", "#a7c3e6")],
-            foreground=[("selected", "white"), ("active", "black")]
-        )
-
-    def open_automation_settings(self):
-        """Open the automation and shortcut settings popup."""
-        if self.automation_window and self.automation_window.winfo_exists():
-            self.automation_window.lift()
-            return
-
-        self.automation_window = tk.Toplevel(self.root)
-        self.automation_window.title("Automation & Shortcut Settings")
-        self.automation_window.geometry("560x520")
-
-        def _cleanup():
-            if self.automation_window and self.automation_window.winfo_exists():
-                self.automation_window.destroy()
-            self.automation_window = None
-            self.btn_clear_target_bind = None
-            self.btn_manual_rescan_bind = None
-
-        self.automation_window.protocol("WM_DELETE_WINDOW", _cleanup)
-
-        container = tk.Frame(self.automation_window, padx=12, pady=10)
-        container.pack(fill="both", expand=True)
-
-        tk.Label(
-            container,
-            text="Automation Preferences",
-            font=("Arial", 11, "bold"),
-            fg="#2c5aa0"
-        ).pack(anchor="w")
-
-        tk.Label(
-            container,
-            text="Manage scan behavior, startup actions, and shortcut keys in one place.",
-            fg="gray",
-            font=("Arial", 9)
-        ).pack(anchor="w", pady=(2, 8))
-
-        options_frame = tk.LabelFrame(container, text="Automation Toggles")
-        options_frame.pack(fill="x", padx=2, pady=4)
-
-        tk.Checkbutton(
-            options_frame,
-            text="Restart before rescanning controls (after the first scan)",
-            variable=self.auto_restart_on_rescan,
-            command=self.schedule_save
-        ).pack(anchor="w", padx=8, pady=4)
-
-        tk.Checkbutton(
-            options_frame,
-            text="Auto-restart and scan when joining a Race session",
-            variable=self.auto_restart_on_race,
-            command=self.schedule_save
-        ).pack(anchor="w", padx=8, pady=4)
-
-        tk.Checkbutton(
-            options_frame,
-            text="Show scan completion popup",
-            variable=self.show_scan_popup,
-            command=self.schedule_save
-        ).pack(anchor="w", padx=8, pady=4)
-
-        tk.Checkbutton(
-            options_frame,
-            text="Start with Windows",
-            variable=self.start_with_windows,
-            command=self._on_startup_toggle
-        ).pack(anchor="w", padx=8, pady=4)
-
-        tk.Checkbutton(
-            options_frame,
-            text="Keep trying to reach hotkey targets (no timeout)",
-            variable=self.keep_trying_targets,
-            command=self.schedule_save
-        ).pack(anchor="w", padx=8, pady=4)
-
-        hotkeys_frame = tk.LabelFrame(container, text="Hotkeys")
-        hotkeys_frame.pack(fill="x", padx=2, pady=(10, 4))
-
-        clear_row = tk.Frame(hotkeys_frame)
-        clear_row.pack(fill="x", padx=8, pady=6)
-        tk.Label(
-            clear_row,
-            text="Clear target hotkey (optional):"
-        ).pack(side="left")
-        self.btn_clear_target_bind = tk.Button(
-            clear_row,
-            text="Set Clear Hotkey",
-            width=18,
-            command=self._set_clear_target_bind
-        )
-        self.btn_clear_target_bind.pack(side="left", padx=6)
-
-        rescan_row = tk.Frame(hotkeys_frame)
-        rescan_row.pack(fill="x", padx=8, pady=(0, 8))
-        tk.Label(
-            rescan_row,
-            text="Manual rescan hotkey (restart + scan + load preset):"
-        ).pack(side="left")
-        self.btn_manual_rescan_bind = tk.Button(
-            rescan_row,
-            text="Set Rescan Hotkey",
-            width=18,
-            command=self._set_manual_rescan_bind
-        )
-        self.btn_manual_rescan_bind.pack(side="left", padx=6)
-
         self._refresh_clear_target_bind_button()
         self._refresh_manual_rescan_bind_button()
 

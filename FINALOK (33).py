@@ -2767,6 +2767,14 @@ class ControlTab(tk.Frame):
         self.presets_container = tk.Frame(presets_frame)
         self.presets_container.pack(fill="both", expand=True)
 
+        self.btn_add_preset_row = tk.Button(
+            presets_frame,
+            text="Add Row (+)",
+            command=self.add_preset_row,
+            bg="#f0f0f0"
+        )
+        self.btn_add_preset_row.pack(fill="x", padx=2, pady=(4, 0))
+
         # Add initial preset rows
         self.add_preset_row(is_reset=True)
         for _ in range(4):
@@ -2826,14 +2834,20 @@ class ControlTab(tk.Frame):
     def set_editing_state(self, enabled: bool):
         """Enable/disable editing based on app mode."""
         state = "normal" if enabled else "readonly"
+        button_state = "normal" if enabled else "disabled"
 
         for row in self.preset_rows:
             try:
                 row["entry"].config(state=state)
                 if "voice_entry" in row:
                     row["voice_entry"].config(state=state)
+                delete_button = row.get("delete_button")
+                if delete_button:
+                    delete_button.config(state=button_state)
             except Exception:
                 pass
+        if self.btn_add_preset_row:
+            self.btn_add_preset_row.config(state=button_state)
 
     def bind_game_key(self, direction: str):
         """
@@ -2938,7 +2952,8 @@ class ControlTab(tk.Frame):
             "entry": value_entry,
             "bind": None,
             "is_reset": is_reset,
-            "voice_entry": voice_entry
+            "voice_entry": voice_entry,
+            "delete_button": None
         }
         self._config_bind_button(bind_button, row_data)
 
@@ -2963,7 +2978,31 @@ class ControlTab(tk.Frame):
             if self.app.app_state != "CONFIG":
                 voice_entry.config(state="readonly")
 
+        if not is_reset:
+            delete_button = tk.Button(
+                frame,
+                text="X",
+                fg="red",
+                width=2,
+                command=lambda r=row_data: self.remove_row(r)
+            )
+            delete_button.pack(side="left", padx=5)
+            if self.app.app_state != "CONFIG":
+                delete_button.config(state="disabled")
+            row_data["delete_button"] = delete_button
+
         self.preset_rows.append(row_data)
+
+    def remove_row(self, row_data: Dict[str, Any]):
+        """Remove a preset row."""
+        if self.app.app_state != "CONFIG":
+            messagebox.showinfo("Notice", "Enter CONFIG mode first.")
+            return
+
+        row_data["frame"].destroy()
+        if row_data in self.preset_rows:
+            self.preset_rows.remove(row_data)
+        self.app.schedule_preset_save()
 
     def monitor_loop(self):
         """Background loop to monitor current value."""
@@ -3045,9 +3084,6 @@ class ControlTab(tk.Frame):
                 is_reset=preset.get("is_reset", False)
             )
 
-        while sum(1 for p in self.preset_rows if not p["is_reset"]) < 4:
-            self.add_preset_row()
-
 
 # Due to length, I'll create a third artifact for ComboTab, GlobalTimingWindow, 
 # and the main application class.
@@ -3127,12 +3163,13 @@ class ComboTab(tk.Frame):
         self.presets_container = tk.Frame(body)
         self.presets_container.pack(fill="both", expand=True, padx=5, pady=5)
 
-        tk.Button(
+        self.btn_add_combo_row = tk.Button(
             body,
             text="Add Row (+)",
             command=self.add_dynamic_row,
             bg="#f0f0f0"
-        ).pack(fill="x", padx=5, pady=(0, 5))
+        )
+        self.btn_add_combo_row.pack(fill="x", padx=5, pady=(0, 5))
 
         # Add initial rows
         self.add_dynamic_row(is_reset=True)
@@ -3142,6 +3179,7 @@ class ComboTab(tk.Frame):
     def set_editing_state(self, enabled: bool):
         """Enable/disable editing based on app mode."""
         state = "normal" if enabled else "readonly"
+        button_state = "normal" if enabled else "disabled"
 
         for row in self.preset_rows:
             for entry in row["entries"].values():
@@ -3155,6 +3193,17 @@ class ComboTab(tk.Frame):
                     voice_entry.config(state=state)
                 except Exception:
                     pass
+            delete_button = row.get("delete_button")
+            if delete_button:
+                try:
+                    delete_button.config(state=button_state)
+                except Exception:
+                    pass
+        if self.btn_add_combo_row:
+            try:
+                self.btn_add_combo_row.config(state=button_state)
+            except Exception:
+                pass
 
     def _bind_autosave_entry(self, entry: tk.Entry) -> None:
         """Attach auto-save handlers to entries."""
@@ -3215,7 +3264,8 @@ class ComboTab(tk.Frame):
             "entries": {},
             "bind": None,
             "is_reset": is_reset,
-            "voice_entry": None
+            "voice_entry": None,
+            "delete_button": None
         }
         self._config_bind_button(bind_button, row_data)
 
@@ -3230,13 +3280,17 @@ class ComboTab(tk.Frame):
 
         # Delete button (except for RESET)
         if not is_reset:
-            tk.Button(
+            delete_button = tk.Button(
                 frame,
                 text="X",
                 fg="red",
                 command=lambda r=row_data: self.remove_row(r),
                 width=2
-            ).pack(side="left", padx=5)
+            )
+            delete_button.pack(side="left", padx=5)
+            if self.app.app_state != "CONFIG":
+                delete_button.config(state="disabled")
+            row_data["delete_button"] = delete_button
 
         # Load existing data if provided
         if existing:
@@ -3270,6 +3324,7 @@ class ComboTab(tk.Frame):
     def remove_row(self, row_data: Dict[str, Any]):
         """Remove a preset row."""
         if self.app.app_state != "CONFIG":
+            messagebox.showinfo("Notice", "Enter CONFIG mode first.")
             return
 
         row_data["frame"].destroy()
@@ -3865,7 +3920,7 @@ class iRacingControlApp:
 
         setup_tab = ttk.Frame(main_tabs)
         controls_tab = ttk.Frame(main_tabs)
-        main_tabs.add(setup_tab, text="Setup")
+        main_tabs.add(setup_tab, text="🛠 Setup")
         main_tabs.add(controls_tab, text="🎮 Controls")
 
         setup_container = tk.Frame(setup_tab)

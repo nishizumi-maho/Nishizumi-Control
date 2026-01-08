@@ -53,6 +53,7 @@ See [`requirements.txt`](requirements.txt) for the full Python dependency list.
 
 ## Known Issues
 1. The application becomes “frozen” while iRacing is loading and will only unfreeze after the game has fully loaded. The application does not stop working; it is simply scanning for large changes and fluctuations in the telemetry during the simulation’s loading process.
+2. The application do not work if vJoy is installed.
 
 ## License & Attribution
 - Licensed under the **MIT License** (see [`license.md`](license.md)).

@@ -15,7 +15,7 @@ Version: 5.0.0
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox, colorchooser, filedialog
+from tkinter import ttk, messagebox, colorchooser, filedialog, font as tkfont
 import time
 import ctypes
 import keyboard
@@ -3203,6 +3203,7 @@ class ComboTab(tk.Frame):
             )
         else:
             self.column_width = 8
+        self._combo_columns = self._build_combo_columns()
 
         scroll_frame = ScrollableFrame(self)
         scroll_frame.pack(fill="both", expand=True)
@@ -3219,30 +3220,38 @@ class ComboTab(tk.Frame):
         header = tk.Frame(body)
         header.pack(fill="x", padx=5, pady=5)
 
+        self._apply_combo_columns(header)
         tk.Label(
-            header, 
-            text="Trigger", 
-            width=15, 
-            anchor="w", 
+            header,
+            text="Trigger",
+            anchor="w",
             font=("Arial", 9, "bold")
-        ).pack(side="left", padx=2)
+        ).grid(row=0, column=0, sticky="w", padx=2)
 
-        for var_name in self.var_names:
+        for idx, var_name in enumerate(self.var_names, start=1):
             tk.Label(
                 header,
                 text=var_name.replace("dc", ""),
-                width=self.column_width,
                 anchor="w",
                 font=("Arial", 8)
-            ).pack(side="left", padx=2)
+            ).grid(row=0, column=idx, sticky="w", padx=2)
 
         tk.Label(
             header,
             text="Voice trigger phrase",
-            width=18,
             anchor="w",
             font=("Arial", 8, "bold")
-        ).pack(side="left", padx=4)
+        ).grid(
+            row=0,
+            column=len(self.var_names) + 1,
+            sticky="w",
+            padx=4
+        )
+        tk.Label(header, text="").grid(
+            row=0,
+            column=len(self.var_names) + 2,
+            sticky="w"
+        )
 
         tk.Label(
             body,
@@ -3346,6 +3355,7 @@ class ComboTab(tk.Frame):
         """Add a combo preset row."""
         frame = tk.Frame(self.presets_container)
         frame.pack(fill="x", pady=2)
+        self._apply_combo_columns(frame)
 
         bind_button = tk.Button(
             frame,
@@ -3353,7 +3363,7 @@ class ComboTab(tk.Frame):
             width=15,
             fg="red" if is_reset else "black"
         )
-        bind_button.pack(side="left", padx=2)
+        bind_button.grid(row=0, column=0, sticky="w", padx=2)
 
         row_data = {
             "frame": frame,
@@ -3366,9 +3376,9 @@ class ComboTab(tk.Frame):
         self._config_bind_button(bind_button, row_data)
 
         # Create entry for each variable
-        for var_name in self.var_names:
+        for idx, var_name in enumerate(self.var_names, start=1):
             entry = ttk.Entry(frame, width=self.column_width)
-            entry.pack(side="left", padx=2)
+            entry.grid(row=0, column=idx, sticky="w", padx=2)
             if self.app.app_state != "CONFIG":
                 entry.config(state="readonly")
             row_data["entries"][var_name] = entry
@@ -3392,8 +3402,9 @@ class ComboTab(tk.Frame):
                 )
                 bind_button.config(text=row_data["bind"], bg=bg_color)
 
+        voice_column = len(self.var_names) + 1
         voice_entry = ttk.Entry(frame, width=18)
-        voice_entry.pack(side="left", padx=4)
+        voice_entry.grid(row=0, column=voice_column, sticky="w", padx=4)
         if existing and existing.get("voice_phrase"):
             voice_entry.insert(0, existing.get("voice_phrase", ""))
         if self.app.app_state != "CONFIG":
@@ -3410,7 +3421,12 @@ class ComboTab(tk.Frame):
                 command=lambda r=row_data: self.remove_row(r),
                 width=2
             )
-            delete_button.pack(side="left", padx=5)
+            delete_button.grid(
+                row=0,
+                column=voice_column + 1,
+                sticky="w",
+                padx=5
+            )
             if self.app.app_state != "CONFIG":
                 delete_button.config(state="disabled")
             row_data["delete_button"] = delete_button
@@ -3445,6 +3461,58 @@ class ComboTab(tk.Frame):
                 )
             })
         return {"presets": presets_data}
+
+    def _build_combo_columns(self) -> List[Dict[str, Any]]:
+        header_font = tkfont.Font(family="Arial", size=8)
+        header_bold_font = tkfont.Font(family="Arial", size=8, weight="bold")
+        trigger_font = tkfont.Font(family="Arial", size=9, weight="bold")
+        entry_font = tkfont.nametofont("TkDefaultFont")
+
+        columns = [
+            {
+                "title": "Trigger",
+                "entry_chars": 15,
+                "header_font": trigger_font,
+                "min_padding": 6
+            }
+        ]
+        for var_name in self.var_names:
+            columns.append(
+                {
+                    "title": var_name.replace("dc", ""),
+                    "entry_chars": self.column_width,
+                    "header_font": header_font,
+                    "min_padding": 6
+                }
+            )
+        columns.append(
+            {
+                "title": "Voice trigger phrase",
+                "entry_chars": 18,
+                "header_font": header_bold_font,
+                "min_padding": 8
+            }
+        )
+        columns.append(
+            {
+                "title": "",
+                "entry_chars": 2,
+                "header_font": header_font,
+                "min_padding": 4
+            }
+        )
+
+        for column in columns:
+            header_width = column["header_font"].measure(column["title"])
+            entry_width = entry_font.measure("0" * column["entry_chars"])
+            column["minsize"] = max(header_width, entry_width) + column[
+                "min_padding"
+            ]
+        return columns
+
+    def _apply_combo_columns(self, frame: tk.Frame) -> None:
+        for idx, column in enumerate(self._combo_columns):
+            frame.grid_columnconfigure(idx, minsize=column["minsize"])
 
     def set_config(self, config: Dict[str, Any]):
         """Load combo configuration."""

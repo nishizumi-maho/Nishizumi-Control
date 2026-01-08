@@ -2820,42 +2820,32 @@ class ControlTab(tk.Frame):
             justify="left"
         ).pack(anchor="w", padx=2, pady=(0, 5))
 
-        self.type_width = 8
-        self.macro_width = 12
-        self.keybind_width = 14
-        self.voice_width = 22
-        self.column_pad = 4
-
         header = tk.Frame(presets_frame)
-        header.pack(fill="x", padx=self.column_pad, pady=(0, 2))
+        header.pack(fill="x", padx=2, pady=(0, 2))
         tk.Label(
-            header,
-            text="Type",
-            width=self.type_width,
-            anchor="w",
-            font=("Arial", 8, "bold")
+            header, text="Type", width=6, anchor="w", font=("Arial", 8, "bold")
         ).pack(side="left")
         tk.Label(
             header,
             text="Macro value",
-            width=self.macro_width,
+            width=8,
             anchor="w",
             font=("Arial", 8, "bold")
-        ).pack(side="left", padx=self.column_pad)
+        ).pack(side="left", padx=5)
         tk.Label(
             header,
             text="Keybinding",
-            width=self.keybind_width,
+            width=12,
             anchor="w",
             font=("Arial", 8, "bold")
-        ).pack(side="left", padx=self.column_pad)
+        ).pack(side="left", padx=5)
         tk.Label(
             header,
             text="Voice trigger phrase",
-            width=self.voice_width,
+            width=18,
             anchor="w",
             font=("Arial", 8, "bold")
-        ).pack(side="left", padx=self.column_pad)
+        ).pack(side="left", padx=5)
 
         self.presets_container = tk.Frame(presets_frame)
         self.presets_container.pack(fill="both", expand=True)
@@ -3018,23 +3008,23 @@ class ControlTab(tk.Frame):
         tk.Label(
             frame,
             text=label_text,
-            width=self.type_width,
+            width=6,
             anchor="w",
             fg="red" if is_reset else "black"
         ).pack(side="left")
 
-        value_entry = ttk.Entry(frame, width=self.macro_width)
-        value_entry.pack(side="left", padx=self.column_pad)
+        value_entry = ttk.Entry(frame, width=8)
+        value_entry.pack(side="left", padx=5)
         self._bind_autosave_entry(value_entry)
 
         if self.app.app_state != "CONFIG":
             value_entry.config(state="readonly")
 
-        bind_button = tk.Button(frame, text="Set Bind", width=self.keybind_width)
-        bind_button.pack(side="left", padx=self.column_pad)
+        bind_button = tk.Button(frame, text="Set Bind", width=12)
+        bind_button.pack(side="left", padx=5)
 
-        voice_entry = ttk.Entry(frame, width=self.voice_width)
-        voice_entry.pack(side="left", padx=self.column_pad)
+        voice_entry = ttk.Entry(frame, width=18)
+        voice_entry.pack(side="left", padx=5)
         voice_entry.insert(0, "")
         self._bind_autosave_entry(voice_entry)
         if self.app.app_state != "CONFIG":
@@ -3201,15 +3191,18 @@ class ComboTab(tk.Frame):
         self.controllers = controllers_dict
         self.var_names = list(self.controllers.keys())
         self.preset_rows: List[Dict[str, Any]] = []
-        self.display_names = [name.replace("dc", "") for name in self.var_names]
-        if self.display_names:
-            max_display_len = max(len(name) for name in self.display_names)
-            self.column_width = max(10, min(22, max_display_len + 2))
+        if self.var_names:
+            self.column_width = max(
+                8,
+                min(
+                    18,
+                    max(
+                        len(name.replace("dc", "")) for name in self.var_names
+                    ) + 2
+                )
+            )
         else:
-            self.column_width = 10
-        self.trigger_width = 15
-        self.voice_width = 22
-        self.column_pad = 3
+            self.column_width = 8
 
         scroll_frame = ScrollableFrame(self)
         scroll_frame.pack(fill="both", expand=True)
@@ -3229,27 +3222,27 @@ class ComboTab(tk.Frame):
         tk.Label(
             header, 
             text="Trigger", 
-            width=self.trigger_width,
+            width=15, 
             anchor="w", 
             font=("Arial", 9, "bold")
-        ).pack(side="left", padx=self.column_pad)
+        ).pack(side="left", padx=2)
 
-        for var_name, display_name in zip(self.var_names, self.display_names):
+        for var_name in self.var_names:
             tk.Label(
                 header,
-                text=display_name,
+                text=var_name.replace("dc", ""),
                 width=self.column_width,
                 anchor="w",
                 font=("Arial", 8)
-            ).pack(side="left", padx=self.column_pad)
+            ).pack(side="left", padx=2)
 
         tk.Label(
             header,
             text="Voice trigger phrase",
-            width=self.voice_width,
+            width=18,
             anchor="w",
             font=("Arial", 8, "bold")
-        ).pack(side="left", padx=self.column_pad)
+        ).pack(side="left", padx=4)
 
         tk.Label(
             body,
@@ -3357,10 +3350,10 @@ class ComboTab(tk.Frame):
         bind_button = tk.Button(
             frame,
             text="RESET" if is_reset else "Set Bind",
-            width=self.trigger_width,
+            width=15,
             fg="red" if is_reset else "black"
         )
-        bind_button.pack(side="left", padx=self.column_pad)
+        bind_button.pack(side="left", padx=2)
 
         row_data = {
             "frame": frame,
@@ -3375,7 +3368,7 @@ class ComboTab(tk.Frame):
         # Create entry for each variable
         for var_name in self.var_names:
             entry = ttk.Entry(frame, width=self.column_width)
-            entry.pack(side="left", padx=self.column_pad)
+            entry.pack(side="left", padx=2)
             if self.app.app_state != "CONFIG":
                 entry.config(state="readonly")
             row_data["entries"][var_name] = entry
@@ -3399,8 +3392,8 @@ class ComboTab(tk.Frame):
                 )
                 bind_button.config(text=row_data["bind"], bg=bg_color)
 
-        voice_entry = ttk.Entry(frame, width=self.voice_width)
-        voice_entry.pack(side="left", padx=self.column_pad)
+        voice_entry = ttk.Entry(frame, width=18)
+        voice_entry.pack(side="left", padx=4)
         if existing and existing.get("voice_phrase"):
             voice_entry.insert(0, existing.get("voice_phrase", ""))
         if self.app.app_state != "CONFIG":

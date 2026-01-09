@@ -5892,6 +5892,7 @@ class iRacingControlApp:
         else:
             self.overlay.deiconify()
             self.overlay_visible = True
+        self.schedule_save()
 
     def notify_overlay_status(self, text: str, color: str):
         """Update overlay status text temporarily."""
@@ -6183,6 +6184,7 @@ class iRacingControlApp:
         data = {
             "global_timing": GLOBAL_TIMING,
             "hud_style": self.overlay.style_cfg,
+            "overlay_visible": self.overlay_visible,
             "show_overlay_feedback": self.show_overlay_feedback.get(),
             "use_keyboard_only": self.use_keyboard_only.get(),
             "use_tts": self.use_tts.get(),
@@ -6242,6 +6244,7 @@ class iRacingControlApp:
             self.overlay.style_cfg.update(style)
             self.overlay.apply_style(self.overlay.style_cfg)
 
+        self.overlay_visible = data.get("overlay_visible", True)
         self.show_overlay_feedback.set(data.get("show_overlay_feedback", True))
 
         self.use_keyboard_only.set(data.get("use_keyboard_only", False))

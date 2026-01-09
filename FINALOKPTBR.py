@@ -1749,16 +1749,23 @@ class OverlayWindow(tk.Toplevel):
         self.overrideredirect(True)
         self.wm_attributes("-topmost", True)
         self.wm_attributes("-alpha", 0.85)
-        self.geometry("250x150+50+50")
+        self._pos_x = 50
+        self._pos_y = 50
         apply_app_icon(self)
 
         self.style_cfg = {
             "bg": "black",
             "fg": "white",
             "font_size": 10,
-            "opacity": 0.85
+            "opacity": 0.85,
+            "width": 250,
+            "height": 150
         }
 
+        self.geometry(
+            f"{self.style_cfg['width']}x{self.style_cfg['height']}"
+            f"+{self._pos_x}+{self._pos_y}"
+        )
         self.configure(bg=self.style_cfg["bg"])
 
         # Status header
@@ -1806,6 +1813,8 @@ class OverlayWindow(tk.Toplevel):
         dy = event.y - self.y
         x = self.winfo_x() + dx
         y = self.winfo_y() + dy
+        self._pos_x = x
+        self._pos_y = y
         self.geometry(f"+{x}+{y}")
 
     def apply_style(self, style_dict: Dict[str, Any]):
@@ -1820,9 +1829,14 @@ class OverlayWindow(tk.Toplevel):
         fg = self.style_cfg["fg"]
         fs = self.style_cfg["font_size"]
         op = self.style_cfg["opacity"]
+        width = int(self.style_cfg.get("width", self.winfo_width() or 250))
+        height = int(self.style_cfg.get("height", self.winfo_height() or 150))
+        width = max(150, width)
+        height = max(80, height)
 
         self.configure(bg=bg)
         self.wm_attributes("-alpha", op)
+        self.geometry(f"{width}x{height}+{self._pos_x}+{self._pos_y}")
 
         self.frame_status.config(bg=bg)
         self.lbl_status.config(bg=bg, font=("Consolas", fs + 1, "bold"))
@@ -2062,6 +2076,30 @@ class OverlayConfigTab(tk.Frame):
         self.scale_opacity.set(self.app.overlay.style_cfg.get("opacity", 0.85))
         self.scale_opacity.grid(row=3, column=1, padx=5, pady=5, sticky="we")
 
+        tk.Label(appearance_frame, text="Largura do overlay:").grid(
+            row=4, column=0, padx=5, sticky="w"
+        )
+        self.scale_width = tk.Scale(
+            appearance_frame,
+            from_=150,
+            to=800,
+            orient="horizontal"
+        )
+        self.scale_width.set(self.app.overlay.style_cfg.get("width", 250))
+        self.scale_width.grid(row=4, column=1, padx=5, pady=5, sticky="we")
+
+        tk.Label(appearance_frame, text="Altura do overlay:").grid(
+            row=5, column=0, padx=5, sticky="w"
+        )
+        self.scale_height = tk.Scale(
+            appearance_frame,
+            from_=80,
+            to=600,
+            orient="horizontal"
+        )
+        self.scale_height.set(self.app.overlay.style_cfg.get("height", 150))
+        self.scale_height.grid(row=5, column=1, padx=5, pady=5, sticky="we")
+
         for i in range(2):
             appearance_frame.columnconfigure(i, weight=1)
 
@@ -2119,7 +2157,7 @@ class OverlayConfigTab(tk.Frame):
             text="Aplicar estilo",
             command=self.apply_style,
             bg="#90ee90"
-        ).grid(row=4, column=0, columnspan=2, sticky="we", padx=5, pady=(5, 5))
+        ).grid(row=6, column=0, columnspan=2, sticky="we", padx=5, pady=(5, 5))
 
         # Variable selection (per-car)
         variables_frame = tk.LabelFrame(
@@ -2172,6 +2210,8 @@ class OverlayConfigTab(tk.Frame):
         """Apply current style settings to overlay."""
         self.app.overlay.style_cfg["font_size"] = int(self.scale_font.get())
         self.app.overlay.style_cfg["opacity"] = float(self.scale_opacity.get())
+        self.app.overlay.style_cfg["width"] = int(self.scale_width.get())
+        self.app.overlay.style_cfg["height"] = int(self.scale_height.get())
         self.app.overlay.apply_style(self.app.overlay.style_cfg)
         self.app.save_config()
 

@@ -2869,8 +2869,18 @@ class ControlTab(tk.Frame):
 
     def update_status_label(self, text: str, color: str):
         """Update status label."""
-        if self.app:
-            self.app.ui(self.lbl_status.config, text=text, fg=color)
+        if not self.app:
+            return
+
+        def _apply():
+            try:
+                if not self.lbl_status.winfo_exists():
+                    return
+                self.lbl_status.config(text=text, fg=color)
+            except Exception:
+                pass
+
+        self.app.ui(_apply)
 
     def _bind_autosave_entry(self, entry: tk.Entry) -> None:
         """Attach auto-save handlers to entries."""

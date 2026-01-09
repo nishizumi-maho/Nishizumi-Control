@@ -6004,7 +6004,13 @@ class iRacingControlApp:
         throttle = self._safe_float(self._read_ir_value("Throttle"), 0.0)
         brake = self._safe_float(self._read_ir_value("Brake"), 0.0)
 
-        abs_active = self._bool_from_keys([
+        has_abs = "dcABS" in self.controllers
+        has_tc = any(
+            key in self.controllers
+            for key in ("dcTractionControl", "dcTractionControl2")
+        )
+
+        abs_active = has_abs and self._bool_from_keys([
             "BrakeABSactive",
             "BrakeABSActive",
             "BrakeABSActiveLF",
@@ -6012,7 +6018,7 @@ class iRacingControlApp:
             "BrakeABSActiveLR",
             "BrakeABSActiveRR",
         ])
-        tc_active = self._bool_from_keys([
+        tc_active = has_tc and self._bool_from_keys([
             "TractionControlActive",
             "TractionControlEngaged",
             "TCActive",
@@ -6063,8 +6069,13 @@ class iRacingControlApp:
             state["tc_active"] = 0.0
 
         if state["spin_active"] >= cfg["wheelspin_hold_s"]:
+            wheelspin_message = (
+                "Patinagem detectada: aumente o TC ou module o acelerador."
+                if has_tc
+                else "Patinagem detectada: module o acelerador."
+            )
             self._push_overlay_alert(
-                "Patinagem detectada: aumente o TC ou module o acelerador.",
+                wheelspin_message,
                 "orange",
                 cfg,
                 now
@@ -6072,8 +6083,13 @@ class iRacingControlApp:
             state["spin_active"] = 0.0
 
         if state["lock_active"] >= cfg["lockup_hold_s"]:
+            lockup_message = (
+                "Travamento detectado: aumente o ABS ou alivie a pressão no pedal."
+                if has_abs
+                else "Travamento detectado: alivie a pressão no pedal."
+            )
             self._push_overlay_alert(
-                "Travamento detectado: aumente o ABS ou alivie a pressão no pedal.",
+                lockup_message,
                 "orange",
                 cfg,
                 now

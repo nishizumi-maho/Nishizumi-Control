@@ -6013,7 +6013,13 @@ class iRacingControlApp:
         throttle = self._safe_float(self._read_ir_value("Throttle"), 0.0)
         brake = self._safe_float(self._read_ir_value("Brake"), 0.0)
 
-        abs_active = self._bool_from_keys([
+        has_abs = "dcABS" in self.controllers
+        has_tc = any(
+            key in self.controllers
+            for key in ("dcTractionControl", "dcTractionControl2")
+        )
+
+        abs_active = has_abs and self._bool_from_keys([
             "BrakeABSactive",
             "BrakeABSActive",
             "BrakeABSActiveLF",
@@ -6021,7 +6027,7 @@ class iRacingControlApp:
             "BrakeABSActiveLR",
             "BrakeABSActiveRR",
         ])
-        tc_active = self._bool_from_keys([
+        tc_active = has_tc and self._bool_from_keys([
             "TractionControlActive",
             "TractionControlEngaged",
             "TCActive",
@@ -6072,8 +6078,13 @@ class iRacingControlApp:
             state["tc_active"] = 0.0
 
         if state["spin_active"] >= cfg["wheelspin_hold_s"]:
+            wheelspin_message = (
+                "Wheelspin detected: raise TC or modulate the throttle."
+                if has_tc
+                else "Wheelspin detected: modulate the throttle."
+            )
             self._push_overlay_alert(
-                "Wheelspin detected: raise TC or modulate the throttle.",
+                wheelspin_message,
                 "orange",
                 cfg,
                 now
@@ -6081,8 +6092,13 @@ class iRacingControlApp:
             state["spin_active"] = 0.0
 
         if state["lock_active"] >= cfg["lockup_hold_s"]:
+            lockup_message = (
+                "Lock-up detected: increase ABS or ease pedal pressure."
+                if has_abs
+                else "Lock-up detected: ease pedal pressure."
+            )
             self._push_overlay_alert(
-                "Lock-up detected: increase ABS or ease pedal pressure.",
+                lockup_message,
                 "orange",
                 cfg,
                 now

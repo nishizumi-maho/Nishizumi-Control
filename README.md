@@ -3,6 +3,8 @@
 
 **Uninstall vJoy to use this app!**
 
+Download it here: https://github.com/nishizumi-maho/Nishizumi-Control/releases/tag/V5.i.5
+
 
 An accessibility-focused control manager for iRacing that provides:
 - Dynamic driver control adjustment (brake bias, traction control, etc.)

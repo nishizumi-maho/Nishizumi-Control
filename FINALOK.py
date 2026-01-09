@@ -174,11 +174,10 @@ except ImportError:
     HAS_PYAUDIO = False
     print("Warning: 'pyaudio' not installed. Audio device selection limited.")
 
-_speech_spec = importlib.util.find_spec("speech_recognition")
-if _speech_spec is not None:
+try:
     import speech_recognition as sr
     HAS_SPEECH = True
-else:
+except ImportError:
     sr = None
     HAS_SPEECH = False
     print("Warning: 'speech_recognition' not installed. Voice triggers disabled.")

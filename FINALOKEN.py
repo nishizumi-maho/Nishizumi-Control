@@ -3176,10 +3176,41 @@ class ControlTab(tk.Frame):
             ]
         }
 
+    def get_value_config(self) -> Dict[str, Any]:
+        """Get preset values/phrases without bindings."""
+        return {
+            "presets": [
+                {
+                    "val": row["entry"].get(),
+                    "is_reset": row.get("is_reset", False),
+                    "voice_phrase": (
+                        row.get("voice_entry").get() if row.get("voice_entry") else ""
+                    )
+                }
+                for row in self.preset_rows
+            ]
+        }
+
     def destroy(self):  # type: ignore[override]
         """Ensure monitoring loop stops when widget is destroyed."""
         self.running = False
         super().destroy()
+
+    def _apply_row_value(self, row: Dict[str, Any], preset: Dict[str, Any]) -> None:
+        entry = row["entry"]
+        entry.config(state="normal")
+        entry.delete(0, tk.END)
+        entry.insert(0, preset.get("val", ""))
+        if self.app.app_state != "CONFIG":
+            entry.config(state="readonly")
+
+        voice_entry = row.get("voice_entry")
+        if voice_entry:
+            voice_entry.config(state="normal")
+            voice_entry.delete(0, tk.END)
+            voice_entry.insert(0, preset.get("voice_phrase", ""))
+            if self.app.app_state != "CONFIG":
+                voice_entry.config(state="readonly")
 
     def set_config(self, config: Dict[str, Any]):
         """Load configuration."""
@@ -3215,6 +3246,38 @@ class ControlTab(tk.Frame):
                 existing=preset, 
                 is_reset=preset.get("is_reset", False)
             )
+
+    def apply_value_config(self, config: Dict[str, Any]) -> None:
+        """Apply values/phrases while preserving existing bindings."""
+        if not config:
+            return
+
+        saved_presets = config.get("presets", [])
+        if not saved_presets:
+            return
+
+        reset_rows = [row for row in self.preset_rows if row.get("is_reset")]
+        normal_rows = [row for row in self.preset_rows if not row.get("is_reset")]
+        reset_used = False
+        normal_index = 0
+
+        for preset in saved_presets:
+            is_reset = preset.get("is_reset", False)
+            if is_reset:
+                if reset_rows and not reset_used:
+                    row = reset_rows[0]
+                    reset_used = True
+                else:
+                    self.add_preset_row(is_reset=True)
+                    row = self.preset_rows[-1]
+            else:
+                if normal_index < len(normal_rows):
+                    row = normal_rows[normal_index]
+                    normal_index += 1
+                else:
+                    self.add_preset_row()
+                    row = self.preset_rows[-1]
+            self._apply_row_value(row, preset)
 
 
 # Due to length, I'll create a third artifact for ComboTab, GlobalTimingWindow, 
@@ -3495,6 +3558,23 @@ class ComboTab(tk.Frame):
             })
         return {"presets": presets_data}
 
+    def get_value_config(self) -> Dict[str, Any]:
+        """Get combo values/phrases without bindings."""
+        presets_data = []
+        for row in self.preset_rows:
+            values = {
+                var_name: entry.get()
+                for var_name, entry in row["entries"].items()
+            }
+            presets_data.append({
+                "vals": values,
+                "is_reset": row["is_reset"],
+                "voice_phrase": (
+                    row.get("voice_entry").get() if row.get("voice_entry") else ""
+                )
+            })
+        return {"presets": presets_data}
+
     def set_config(self, config: Dict[str, Any]):
         """Load combo configuration."""
         # Clear existing rows
@@ -3522,6 +3602,61 @@ class ComboTab(tk.Frame):
 
         if len(self.preset_rows) < 2:
             self.add_dynamic_row()
+
+    def _apply_combo_row_values(
+        self,
+        row: Dict[str, Any],
+        preset: Dict[str, Any]
+    ) -> None:
+        values = preset.get("vals", {})
+        for var_name, entry in row["entries"].items():
+            if var_name not in values:
+                continue
+            entry.config(state="normal")
+            entry.delete(0, tk.END)
+            entry.insert(0, values.get(var_name, ""))
+            if self.app.app_state != "CONFIG":
+                entry.config(state="readonly")
+
+        voice_entry = row.get("voice_entry")
+        if voice_entry:
+            voice_entry.config(state="normal")
+            voice_entry.delete(0, tk.END)
+            voice_entry.insert(0, preset.get("voice_phrase", ""))
+            if self.app.app_state != "CONFIG":
+                voice_entry.config(state="readonly")
+
+    def apply_value_config(self, config: Dict[str, Any]) -> None:
+        """Apply combo values/phrases while preserving existing bindings."""
+        if not config:
+            return
+
+        saved_presets = config.get("presets", [])
+        if not saved_presets:
+            return
+
+        reset_rows = [row for row in self.preset_rows if row.get("is_reset")]
+        normal_rows = [row for row in self.preset_rows if not row.get("is_reset")]
+        reset_used = False
+        normal_index = 0
+
+        for preset in saved_presets:
+            is_reset = preset.get("is_reset", False)
+            if is_reset:
+                if reset_rows and not reset_used:
+                    row = reset_rows[0]
+                    reset_used = True
+                else:
+                    self.add_dynamic_row(is_reset=True)
+                    row = self.preset_rows[-1]
+            else:
+                if normal_index < len(normal_rows):
+                    row = normal_rows[normal_index]
+                    normal_index += 1
+                else:
+                    self.add_dynamic_row()
+                    row = self.preset_rows[-1]
+            self._apply_combo_row_values(row, preset)
 
 
 # ======================================================================
@@ -4196,6 +4331,25 @@ class iRacingControlApp:
             bg="#ffcccc"
         )
         self.btn_clear_preset.pack(side="left", expand=True, fill="x", padx=2)
+
+        share_frame = tk.Frame(presets_frame)
+        share_frame.pack(fill="x", padx=5, pady=(0, 5))
+
+        self.btn_export_preset_values = tk.Button(
+            share_frame,
+            text="Export Values",
+            command=self.action_export_preset_values,
+            bg="#e6f2ff"
+        )
+        self.btn_export_preset_values.pack(side="left", expand=True, fill="x", padx=2)
+
+        self.btn_import_preset_values = tk.Button(
+            share_frame,
+            text="Import Values",
+            command=self.action_import_preset_values,
+            bg="#e6f2ff"
+        )
+        self.btn_import_preset_values.pack(side="left", expand=True, fill="x", padx=2)
 
         # Device management
         devices_frame = tk.LabelFrame(
@@ -5155,6 +5309,88 @@ class iRacingControlApp:
 
             self.save_config()
             self.update_preset_ui()
+
+    def _build_preset_values_payload(self) -> Dict[str, Any]:
+        """Build a values-only payload for preset sharing."""
+        return {
+            "version": 1,
+            "app": APP_NAME,
+            "car": self.combo_car.get().strip(),
+            "track": self.combo_track.get().strip(),
+            "active_vars": self.active_vars,
+            "tabs": {
+                var_name: tab.get_value_config()
+                for var_name, tab in self.tabs.items()
+            },
+            "combo": self.combo_tab.get_value_config() if self.combo_tab else {}
+        }
+
+    def action_export_preset_values(self) -> None:
+        """Export preset values/macros without bindings."""
+        if not self.tabs and not self.combo_tab:
+            messagebox.showwarning("Export", "No preset data to export.")
+            return
+
+        path = filedialog.asksaveasfilename(
+            title="Export preset values",
+            defaultextension=".json",
+            filetypes=[("Preset Values", "*.json"), ("All Files", "*.*")]
+        )
+        if not path:
+            return
+
+        try:
+            payload = self._build_preset_values_payload()
+            with open(path, "w", encoding="utf-8") as file:
+                json.dump(payload, file, indent=2)
+            messagebox.showinfo(
+                "Exported",
+                f"Preset values exported to:\n{path}"
+            )
+        except OSError as exc:
+            messagebox.showerror("Export Failed", f"Could not export preset:\n{exc}")
+
+    def action_import_preset_values(self) -> None:
+        """Import preset values/macros while preserving bindings."""
+        path = filedialog.askopenfilename(
+            title="Import preset values",
+            filetypes=[("Preset Values", "*.json"), ("All Files", "*.*")]
+        )
+        if not path:
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8") as file:
+                payload = json.load(file)
+        except (OSError, json.JSONDecodeError) as exc:
+            messagebox.showerror("Import Failed", f"Could not import preset:\n{exc}")
+            return
+
+        tabs_data = payload.get("tabs", {})
+        applied_tabs = 0
+        for var_name, config in tabs_data.items():
+            tab = self.tabs.get(var_name)
+            if tab:
+                tab.apply_value_config(config)
+                applied_tabs += 1
+
+        if self.combo_tab and payload.get("combo"):
+            self.combo_tab.apply_value_config(payload.get("combo", {}))
+            applied_tabs += 1
+
+        if applied_tabs == 0:
+            messagebox.showwarning(
+                "Import",
+                "No matching presets found for the current controls."
+            )
+            return
+
+        self.register_current_listeners()
+        self.schedule_preset_save()
+        messagebox.showinfo(
+            "Imported",
+            "Preset values imported. Existing binds were preserved."
+        )
 
     def auto_preset_loop(self):
         """Background loop for auto-detecting car/track."""

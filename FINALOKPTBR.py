@@ -4043,6 +4043,7 @@ class iRacingControlApp:
         self.auto_save_presets = tk.BooleanVar(value=True)
         self.lock_preset_selection = tk.BooleanVar(value=True)
         self.start_with_windows = tk.BooleanVar(value=False)
+        self.focus_on_startup = tk.BooleanVar(value=True)
         self.show_getting_started = tk.BooleanVar(value=True)
         self.clear_target_bind: Optional[str] = None
         self.btn_clear_target_bind: Optional[tk.Button] = None
@@ -4071,6 +4072,7 @@ class iRacingControlApp:
         self._create_menu()
         self._create_main_ui()
         self._update_voice_controls()
+        self._apply_startup_focus_preference()
         self.root.after(300, self._maybe_show_getting_started)
 
         # Initialize devices
@@ -4531,6 +4533,13 @@ class iRacingControlApp:
 
         tk.Checkbutton(
             stability_frame,
+            text="Focar a janela ao iniciar/reiniciar",
+            variable=self.focus_on_startup,
+            command=self.schedule_save
+        ).pack(anchor="w", padx=8, pady=2)
+
+        tk.Checkbutton(
+            stability_frame,
             text="Continuar tentando atingir os alvos de atalho (sem tempo limite)",
             variable=self.keep_trying_targets,
             command=self.schedule_save
@@ -4623,6 +4632,40 @@ class iRacingControlApp:
         self.open_getting_started_window()
         self.show_getting_started.set(False)
         self.schedule_save()
+
+    def _apply_startup_focus_preference(self) -> None:
+        """Avoid forcing focus when launching if the user disabled it."""
+        if self.focus_on_startup.get():
+            return
+        self.root.after(150, self._suppress_startup_focus)
+
+    def _suppress_startup_focus(self) -> None:
+        if self.focus_on_startup.get():
+            return
+        if sys.platform.startswith("win"):
+            try:
+                hwnd = self.root.winfo_id()
+                sw_shownoactivate = 4
+                swp_nosize = 0x0001
+                swp_nomove = 0x0002
+                swp_nozorder = 0x0004
+                swp_noactivate = 0x0010
+                ctypes.windll.user32.ShowWindow(hwnd, sw_shownoactivate)
+                ctypes.windll.user32.SetWindowPos(
+                    hwnd,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    swp_nosize | swp_nomove | swp_nozorder | swp_noactivate
+                )
+            except Exception:
+                pass
+        try:
+            self.root.lower()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Options UI
@@ -6484,6 +6527,7 @@ class iRacingControlApp:
             "auto_save_presets": self.auto_save_presets.get(),
             "lock_preset_selection": self.lock_preset_selection.get(),
             "start_with_windows": self.start_with_windows.get(),
+            "focus_on_startup": self.focus_on_startup.get(),
             "keep_trying_targets": self.keep_trying_targets.get(),
             "show_scan_popup": self.show_scan_popup.get(),
             "show_getting_started": self.show_getting_started.get(),
@@ -6548,6 +6592,7 @@ class iRacingControlApp:
         self.auto_save_presets.set(data.get("auto_save_presets", True))
         self.lock_preset_selection.set(data.get("lock_preset_selection", True))
         self.start_with_windows.set(data.get("start_with_windows", False))
+        self.focus_on_startup.set(data.get("focus_on_startup", True))
         self.keep_trying_targets.set(data.get("keep_trying_targets", True))
         self.show_scan_popup.set(data.get("show_scan_popup", False))
         self.show_getting_started.set(data.get("show_getting_started", True))

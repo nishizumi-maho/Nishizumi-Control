@@ -2619,6 +2619,10 @@ class GenericController:
                     cancelled = True
                     break
 
+                if self.app and not self.app._can_trigger_commands():
+                    time.sleep(0.1)
+                    continue
+
                 keep_trying = bool(
                     self.app and self.app.keep_trying_targets.get()
                 )
@@ -5156,6 +5160,8 @@ class iRacingControlApp:
 
     def manual_restart_scan(self):
         """Restart the app and trigger a scan + preset reload."""
+        if self.app_state != "RUNNING":
+            return
         detected_car, detected_track = self._detect_current_car_track()
         restart_car = (
             detected_car
@@ -6673,10 +6679,31 @@ class iRacingControlApp:
 
         return bool(value)
 
+    def _read_ir_value(self, key: str) -> Optional[Any]:
+        """Read a telemetry value from the iRacing SDK."""
+        try:
+            with self.ir_lock:
+                if not getattr(self.ir, "is_initialized", False):
+                    self.ir.startup()
+                if getattr(self.ir, "is_connected", True) is False:
+                    return None
+                return self.ir[key]
+        except Exception:
+            return None
+
     def _can_trigger_commands(self) -> bool:
         """Return True when command execution is allowed by safety settings."""
         if not self.block_offtrack_commands.get():
             return True
+
+        track_surface = self._read_ir_value("PlayerTrackSurface")
+        if isinstance(track_surface, str):
+            surface = track_surface.strip().lower()
+            if surface in {"offtrack", "notinworld", "outofworld"}:
+                return False
+        elif isinstance(track_surface, numbers.Number):
+            if int(track_surface) in {0, 1, 6}:
+                return False
 
         is_on_track = self._read_ir_bool("IsOnTrackCar")
         return True if is_on_track is None else is_on_track

@@ -589,17 +589,15 @@ def _compute_timing(is_float: bool = False) -> Tuple[float, float]:
             interval_ms += random.uniform(-rng, rng)
 
     # Ensure minimum values, allowing extremely low latency for bot modes
-    if profile == "bot":
+    if profile in {"bot", "bot_safe"}:
         min_value = 1
-    elif profile == "bot_safe":
-        min_value = 5
     else:
         min_value = 10
     press_ms = max(min_value, press_ms)
     interval_ms = max(min_value, interval_ms)
 
-    # Add extra delay for float variables unless running bot profile
-    if is_float and profile != "bot":
+    # Add extra delay for float variables unless running bot profiles
+    if is_float and profile not in {"bot", "bot_safe"}:
         press_ms += 30
 
     return press_ms / 1000.0, interval_ms / 1000.0

@@ -2497,6 +2497,9 @@ class GenericController:
 
     def request_target(self, target: float):
         """Queue a target adjustment request, overriding any active target."""
+        if self.app and not self.app._commands_allowed():
+            return
+
         with self._target_lock:
             self._requested_target = target
             self._clear_requested = False
@@ -2558,6 +2561,12 @@ class GenericController:
                     cleared = self._clear_requested
 
                 if cleared or pending_target is None:
+                    break
+
+                if self.app and not self.app._commands_allowed():
+                    with self._target_lock:
+                        self._requested_target = None
+                    cancelled = True
                     break
 
                 if pending_target != active_request:
@@ -2721,6 +2730,9 @@ class GenericController:
             Suggested minimal working pulse duration in milliseconds, or None
             if no timing within bounds registers.
         """
+        if self.app and not self.app._commands_allowed():
+            raise ValueError("Commands are blocked while IsOnTrackCar is false.")
+
         if not self.key_increase or not self.key_decrease:
             raise ValueError("Increase/decrease keys must be configured before probing.")
 
@@ -3875,6 +3887,7 @@ class iRacingControlApp:
         self.auto_restart_on_rescan = tk.BooleanVar(value=True)
         self.auto_restart_on_race = tk.BooleanVar(value=True)
         self.keep_trying_targets = tk.BooleanVar(value=True)
+        self.block_off_track_commands = tk.BooleanVar(value=True)
         self.show_scan_popup = tk.BooleanVar(value=False)
         self.auto_save_presets = tk.BooleanVar(value=True)
         self.lock_preset_selection = tk.BooleanVar(value=True)
@@ -3945,6 +3958,19 @@ class iRacingControlApp:
     def _on_startup_toggle(self) -> None:
         self._apply_startup_preference(notify=True)
         self.schedule_save()
+
+    def _commands_allowed(self) -> bool:
+        """Return True when command execution is allowed."""
+        if not self.block_off_track_commands.get():
+            return True
+
+        try:
+            with self.ir_lock:
+                on_track = self.ir["IsOnTrackCar"]
+        except Exception:
+            return False
+
+        return bool(on_track)
 
     def _voice_tuning_config(self) -> Dict[str, Any]:
         """Return sanitized voice tuning configuration from the UI."""
@@ -4350,6 +4376,13 @@ class iRacingControlApp:
             stability_frame,
             text="Keep trying to reach hotkey targets (no timeout)",
             variable=self.keep_trying_targets,
+            command=self.schedule_save
+        ).pack(anchor="w", padx=8, pady=2)
+
+        tk.Checkbutton(
+            stability_frame,
+            text="Block commands when IsOnTrackCar is false",
+            variable=self.block_off_track_commands,
             command=self.schedule_save
         ).pack(anchor="w", padx=8, pady=2)
 
@@ -6213,6 +6246,7 @@ class iRacingControlApp:
             "lock_preset_selection": self.lock_preset_selection.get(),
             "start_with_windows": self.start_with_windows.get(),
             "keep_trying_targets": self.keep_trying_targets.get(),
+            "block_off_track_commands": self.block_off_track_commands.get(),
             "show_scan_popup": self.show_scan_popup.get(),
             "show_getting_started": self.show_getting_started.get(),
             "clear_target_bind": self.clear_target_bind,
@@ -6276,6 +6310,9 @@ class iRacingControlApp:
         self.lock_preset_selection.set(data.get("lock_preset_selection", True))
         self.start_with_windows.set(data.get("start_with_windows", False))
         self.keep_trying_targets.set(data.get("keep_trying_targets", True))
+        self.block_off_track_commands.set(
+            data.get("block_off_track_commands", True)
+        )
         self.show_scan_popup.set(data.get("show_scan_popup", False))
         self.show_getting_started.set(data.get("show_getting_started", True))
         self.clear_target_bind = data.get("clear_target_bind")

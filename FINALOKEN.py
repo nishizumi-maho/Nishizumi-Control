@@ -2583,7 +2583,7 @@ class GenericController:
         last_value: Optional[float] = None
         timing_profile = _normalize_timing_config(GLOBAL_TIMING).get("profile", "aggressive")
         is_bot_profile = timing_profile in {"bot", "bot_safe"}
-        is_bot_safe = timing_profile == "bot_safe"
+        is_bot_experimental = timing_profile == "bot"
         read_fn = self._read_telemetry_stable if is_bot_profile else self.read_telemetry
 
         try:
@@ -2618,7 +2618,7 @@ class GenericController:
                     break
 
                 if self.app and not self.app._commands_allowed():
-                    time.sleep(0.1)
+                    time.sleep(0.0 if is_bot_experimental else 0.1)
                     continue
 
                 keep_trying = bool(
@@ -2633,7 +2633,7 @@ class GenericController:
 
                 current = read_fn()
                 if current is None:
-                    time.sleep(0.05)
+                    time.sleep(0.0 if is_bot_experimental else 0.05)
                     continue
 
                 if self.is_float and last_value is not None:
@@ -2643,7 +2643,7 @@ class GenericController:
                             self._float_step = round(delta, 6)
 
                 if active_target is None:
-                    time.sleep(0.05)
+                    time.sleep(0.0 if is_bot_experimental else 0.05)
                     continue
 
                 diff = active_target - current
@@ -2677,19 +2677,17 @@ class GenericController:
                         base_step = 1.0
 
                     close_threshold = max(0.001, base_step)
-                    if abs_diff <= close_threshold * 2 or overshot:
-                        if is_bot_safe:
-                            _direct_pulse(key, press_ms=8, interval_ms=10)
-                            time.sleep(0.07)
-                        else:
-                            _direct_pulse(key, press_ms=5, interval_ms=5)
-                            time.sleep(0.05)
+                    if is_bot_experimental:
+                        click_pulse(key, self.is_float)
+                    elif abs_diff <= close_threshold * 2 or overshot:
+                        _direct_pulse(key, press_ms=8, interval_ms=10)
+                        time.sleep(0.07)
                     else:
                         click_pulse(key, self.is_float)
                         if abs_diff <= close_threshold * 4:
                             time.sleep(0.03)
                         else:
-                            time.sleep(0.025 if is_bot_safe else 0.02)
+                            time.sleep(0.025)
                 else:
                     click_pulse(key, self.is_float)
                     time.sleep(0.02)

@@ -4999,14 +4999,11 @@ class iRacingControlApp:
                 text="Mode: CONFIG (Click to Save & Run)",
                 bg="orange"
             )
-            input_manager.active = False
-            self._clear_keyboard_hotkeys()
-            voice_listener.set_enabled(False)
+            self.register_current_listeners()
         else:
             # Switch to RUNNING
             self.app_state = "RUNNING"
             self.btn_mode.config(text="Mode: RUNNING", bg="#90ee90")
-            input_manager.active = True
             self.register_current_listeners()
 
         # Update tab editing states
@@ -6844,6 +6841,7 @@ class iRacingControlApp:
         self._clear_keyboard_hotkeys()
         input_manager.listeners.clear()
         voice_phrases: Dict[str, Callable] = {}
+        allow_input = (self.app_state == "RUNNING")
 
         # Register individual tab presets
         for var_name, tab in self.tabs.items():
@@ -6862,7 +6860,7 @@ class iRacingControlApp:
                     continue
 
                 action = self._make_single_action(controller, target)
-                if bind:
+                if bind and allow_input:
                     if bind.startswith("KEY:"):
                         key_name = bind.split(":", 1)[1].lower()
                         handle = keyboard.add_hotkey(key_name, action)
@@ -6883,7 +6881,7 @@ class iRacingControlApp:
                 values = preset.get("vals", {})
 
                 action = self._make_combo_action(values)
-                if bind:
+                if bind and allow_input:
                     if bind.startswith("KEY:"):
                         key_name = bind.split(":", 1)[1].lower()
                         handle = keyboard.add_hotkey(key_name, action)
@@ -6897,7 +6895,7 @@ class iRacingControlApp:
 
         self.voice_phrase_map = voice_phrases
 
-        if self.clear_target_bind:
+        if self.clear_target_bind and allow_input:
             action = self.clear_all_targets
             if self.clear_target_bind.startswith("KEY:"):
                 key_name = self.clear_target_bind.split(":", 1)[1].lower()
@@ -6906,7 +6904,7 @@ class iRacingControlApp:
             else:
                 input_manager.listeners[self.clear_target_bind] = action
 
-        if self.manual_rescan_bind:
+        if self.manual_rescan_bind and allow_input:
             action = self.manual_restart_scan
             if self.manual_rescan_bind.startswith("KEY:"):
                 key_name = self.manual_rescan_bind.split(":", 1)[1].lower()
@@ -6915,7 +6913,7 @@ class iRacingControlApp:
             else:
                 input_manager.listeners[self.manual_rescan_bind] = action
 
-        input_manager.active = (self.app_state == "RUNNING")
+        input_manager.active = allow_input
         if self.app_state != "RUNNING":
             voice_listener.set_enabled(False)
         elif self.use_voice.get():

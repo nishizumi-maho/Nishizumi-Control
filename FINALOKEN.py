@@ -6689,18 +6689,9 @@ class iRacingControlApp:
         """Return True when command execution is allowed by safety settings."""
         if not self.block_offtrack_commands.get():
             return True
-
-        track_surface = self._read_ir_value("PlayerTrackSurface")
-        if isinstance(track_surface, str):
-            surface = track_surface.strip().lower()
-            if surface in {"offtrack", "notinworld", "outofworld"}:
-                return False
-        elif isinstance(track_surface, numbers.Number):
-            if int(track_surface) in {0, 1, 6}:
-                return False
-
-        is_on_track = self._read_ir_bool("IsOnTrackCar")
-        return True if is_on_track is None else is_on_track
+        is_on_track = self._bool_from_keys(["IsOnTrack"])
+        is_on_track_car = self._bool_from_keys(["IsOnTrackCar"])
+        return is_on_track or is_on_track_car
 
     def _make_single_action(self, controller: GenericController, target: float):
         """Create an action that adjusts a single controller to a target."""

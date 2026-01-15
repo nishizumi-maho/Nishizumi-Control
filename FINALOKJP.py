@@ -4046,6 +4046,7 @@ class iRacingControlApp:
         self.auto_scan_on_change = tk.BooleanVar(value=True)
         self.auto_restart_on_rescan = tk.BooleanVar(value=True)
         self.auto_restart_on_race = tk.BooleanVar(value=True)
+        self.block_offtrack_commands = tk.BooleanVar(value=True)
         self.keep_trying_targets = tk.BooleanVar(value=True)
         self.show_scan_popup = tk.BooleanVar(value=False)
         self.auto_save_presets = tk.BooleanVar(value=True)
@@ -4541,6 +4542,13 @@ class iRacingControlApp:
             stability_frame,
             text="ホットキー対象への到達を継続（タイムアウトなし）",
             variable=self.keep_trying_targets,
+            command=self.schedule_save
+        ).pack(anchor="w", padx=8, pady=2)
+
+        tk.Checkbutton(
+            stability_frame,
+            text="IsOnTrackCar が false のときコマンドを無効化",
+            variable=self.block_offtrack_commands,
             command=self.schedule_save
         ).pack(anchor="w", padx=8, pady=2)
 
@@ -6481,6 +6489,7 @@ class iRacingControlApp:
             "auto_scan_on_change": self.auto_scan_on_change.get(),
             "auto_restart_on_rescan": self.auto_restart_on_rescan.get(),
             "auto_restart_on_race": self.auto_restart_on_race.get(),
+            "block_offtrack_commands": self.block_offtrack_commands.get(),
             "auto_save_presets": self.auto_save_presets.get(),
             "lock_preset_selection": self.lock_preset_selection.get(),
             "start_with_windows": self.start_with_windows.get(),
@@ -6544,6 +6553,7 @@ class iRacingControlApp:
         self.auto_scan_on_change.set(data.get("auto_scan_on_change", True))
         self.auto_restart_on_rescan.set(data.get("auto_restart_on_rescan", True))
         self.auto_restart_on_race.set(data.get("auto_restart_on_race", True))
+        self.block_offtrack_commands.set(data.get("block_offtrack_commands", True))
         self.auto_save_presets.set(data.get("auto_save_presets", True))
         self.lock_preset_selection.set(data.get("lock_preset_selection", True))
         self.start_with_windows.set(data.get("start_with_windows", False))
@@ -6601,15 +6611,49 @@ class iRacingControlApp:
     # ------------------------------------------------------------------
     # Voice helpers
     # ------------------------------------------------------------------
+    def _read_ir_bool(self, key: str) -> Optional[bool]:
+        """Read a boolean telemetry flag from the iRacing SDK."""
+        try:
+            with self.ir_lock:
+                if not getattr(self.ir, "is_initialized", False):
+                    self.ir.startup()
+                if getattr(self.ir, "is_connected", True) is False:
+                    return None
+                value = self.ir[key]
+        except Exception:
+            return None
+
+        if value is None:
+            return None
+
+        return bool(value)
+
+    def _can_trigger_commands(self) -> bool:
+        """Return True when command execution is allowed by safety settings."""
+        if not self.block_offtrack_commands.get():
+            return True
+
+        is_on_track = self._read_ir_bool("IsOnTrackCar")
+        return True if is_on_track is None else is_on_track
+
     def _make_single_action(self, controller: GenericController, target: float):
         """Create an action that adjusts a single controller to a target."""
-        return lambda: controller.request_target(target)
+        def action():
+            if self.app_state != "RUNNING":
+                return
+            if not self._can_trigger_commands():
+                return
+            controller.request_target(target)
+
+        return action
 
     def _make_combo_action(self, values: Dict[str, str]):
         """Create an action that adjusts multiple controllers at once."""
 
         def combo_action():
             if self.app_state != "RUNNING":
+                return
+            if not self._can_trigger_commands():
                 return
 
             for var_name, val_str in values.items():

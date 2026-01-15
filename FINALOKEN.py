@@ -11,7 +11,7 @@ A comprehensive control management application for iRacing that provides:
 
 Author: Nishizumi Maho
 All Rights Reserved
-Version: 5.5.0
+Version: 6.0.0
 """
 
 import tkinter as tk
@@ -197,7 +197,7 @@ except Exception as exc:  # noqa: BLE001
 # GLOBAL CONFIGURATION
 # ======================================================================
 APP_NAME = "DominantControl"
-APP_VERSION = "5.0.0"
+APP_VERSION = "6.0.0"
 APP_FOLDER = "DominantControl"
 BASE_PATH = os.getenv("APPDATA") or os.path.expanduser("~")
 CONFIG_FOLDER = os.path.join(BASE_PATH, APP_FOLDER, "configs")

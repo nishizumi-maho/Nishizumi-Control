@@ -3879,7 +3879,6 @@ class iRacingControlApp:
         self.auto_save_presets = tk.BooleanVar(value=True)
         self.lock_preset_selection = tk.BooleanVar(value=True)
         self.start_with_windows = tk.BooleanVar(value=False)
-        self.focus_on_start = tk.BooleanVar(value=True)
         self.show_getting_started = tk.BooleanVar(value=True)
         self.clear_target_bind: Optional[str] = None
         self.btn_clear_target_bind: Optional[tk.Button] = None
@@ -3907,7 +3906,6 @@ class iRacingControlApp:
         # Create UI
         self._create_menu()
         self._create_main_ui()
-        self._apply_startup_focus_mode()
         self._update_voice_controls()
         self.root.after(300, self._maybe_show_getting_started)
 
@@ -3947,12 +3945,6 @@ class iRacingControlApp:
     def _on_startup_toggle(self) -> None:
         self._apply_startup_preference(notify=True)
         self.schedule_save()
-
-    def _apply_startup_focus_mode(self) -> None:
-        """Lower the window after startup if focus stealing is disabled."""
-        if self.focus_on_start.get():
-            return
-        self.root.after(250, self.root.lower)
 
     def _voice_tuning_config(self) -> Dict[str, Any]:
         """Return sanitized voice tuning configuration from the UI."""
@@ -4352,13 +4344,6 @@ class iRacingControlApp:
             text="Start with Windows",
             variable=self.start_with_windows,
             command=self._on_startup_toggle
-        ).pack(anchor="w", padx=8, pady=2)
-
-        tk.Checkbutton(
-            stability_frame,
-            text="Focus app window on startup/restart",
-            variable=self.focus_on_start,
-            command=self.schedule_save
         ).pack(anchor="w", padx=8, pady=2)
 
         tk.Checkbutton(
@@ -6227,7 +6212,6 @@ class iRacingControlApp:
             "auto_save_presets": self.auto_save_presets.get(),
             "lock_preset_selection": self.lock_preset_selection.get(),
             "start_with_windows": self.start_with_windows.get(),
-            "focus_on_start": self.focus_on_start.get(),
             "keep_trying_targets": self.keep_trying_targets.get(),
             "show_scan_popup": self.show_scan_popup.get(),
             "show_getting_started": self.show_getting_started.get(),
@@ -6291,7 +6275,6 @@ class iRacingControlApp:
         self.auto_save_presets.set(data.get("auto_save_presets", True))
         self.lock_preset_selection.set(data.get("lock_preset_selection", True))
         self.start_with_windows.set(data.get("start_with_windows", False))
-        self.focus_on_start.set(data.get("focus_on_start", True))
         self.keep_trying_targets.set(data.get("keep_trying_targets", True))
         self.show_scan_popup.set(data.get("show_scan_popup", False))
         self.show_getting_started.set(data.get("show_getting_started", True))

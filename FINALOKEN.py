@@ -2427,6 +2427,42 @@ class GenericController:
         except Exception:
             return None
 
+    def _read_telemetry_stable(
+        self,
+        samples: int = 3,
+        delay_s: float = 0.01
+    ) -> Optional[float]:
+        """
+        Read telemetry multiple times and return a stabilized value.
+
+        For integer telemetry, returns the most common sample (median tiebreak).
+        For float telemetry, returns the average of collected samples.
+        """
+        values: List[float] = []
+        for _ in range(max(1, samples)):
+            value = self.read_telemetry()
+            if value is not None:
+                values.append(float(value))
+            if delay_s > 0:
+                time.sleep(delay_s)
+
+        if not values:
+            return None
+
+        if self.is_float:
+            return sum(values) / len(values)
+
+        rounded = [int(round(v)) for v in values]
+        counts = {}
+        for value in rounded:
+            counts[value] = counts.get(value, 0) + 1
+        max_count = max(counts.values())
+        candidates = [value for value, count in counts.items() if count == max_count]
+        if len(candidates) == 1:
+            return candidates[0]
+        rounded.sort()
+        return rounded[len(rounded) // 2]
+
     def _detect_float_step(self) -> Optional[float]:
         """Detect the minimal float increment by pulsing once and restoring."""
         if not self.is_float:
@@ -2550,6 +2586,7 @@ class GenericController:
         timing_profile = _normalize_timing_config(GLOBAL_TIMING).get("profile", "aggressive")
         is_bot_profile = timing_profile in {"bot", "bot_safe"}
         is_bot_safe = timing_profile == "bot_safe"
+        read_fn = self._read_telemetry_stable if is_bot_profile else self.read_telemetry
 
         try:
             while True:
@@ -2592,7 +2629,7 @@ class GenericController:
                 if not keep_trying and timeout_deadline and time.time() > timeout_deadline:
                     break
 
-                current = self.read_telemetry()
+                current = read_fn()
                 if current is None:
                     time.sleep(0.05)
                     continue
@@ -2724,7 +2761,7 @@ class GenericController:
         if not self.key_increase or not self.key_decrease:
             raise ValueError("Increase/decrease keys must be configured before probing.")
 
-        baseline = self.read_telemetry()
+        baseline = self._read_telemetry_stable(samples=3, delay_s=0.01)
         if baseline is None:
             return None
 
@@ -2738,7 +2775,7 @@ class GenericController:
         def _restore(target_value: float, timing_ms: int):
             """Attempt to revert telemetry back near baseline after a test."""
             for _ in range(5):
-                current = self.read_telemetry()
+                current = self._read_telemetry_stable(samples=3, delay_s=0.01)
                 if current is None:
                     break
                 if not _changed(target_value, current):
@@ -2752,7 +2789,7 @@ class GenericController:
             for _ in range(max(1, confirmation_attempts)):
                 _direct_pulse(self.key_increase, delay_ms, delay_ms)
                 time.sleep(settle_s)
-                updated = self.read_telemetry()
+                updated = self._read_telemetry_stable(samples=3, delay_s=0.01)
                 if _changed(baseline, updated):
                     success_count += 1
                 else:

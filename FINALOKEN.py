@@ -570,8 +570,8 @@ def _compute_timing(is_float: bool = False) -> Tuple[float, float]:
         press_ms = 150
         interval_ms = 200
     elif profile == "bot":
-        press_ms = 1
-        interval_ms = 1
+        press_ms = 0
+        interval_ms = 0
     elif profile == "bot_safe":
         press_ms = 12
         interval_ms = 6
@@ -590,7 +590,7 @@ def _compute_timing(is_float: bool = False) -> Tuple[float, float]:
 
     # Ensure minimum values, allowing extremely low latency for bot modes
     if profile == "bot":
-        min_value = 1
+        min_value = 0
     elif profile == "bot_safe":
         min_value = 5
     else:

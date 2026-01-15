@@ -5338,14 +5338,10 @@ class iRacingControlApp:
             ):
                 return
 
-            self.saved_presets[car][track] = {
-                "active_vars": None,
-                "tabs": {},
-                "combo": {}
-            }
-
+            del self.saved_presets[car][track]
             self.save_config()
-            self.update_preset_ui()
+            self.rebuild_tabs(list(self.active_vars))
+            self._save_preset_for_pair(car, track, show_message=False)
 
     def _build_preset_values_payload(self) -> Dict[str, Any]:
         """Build a values-only payload for preset sharing."""

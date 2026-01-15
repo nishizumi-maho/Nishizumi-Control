@@ -2619,7 +2619,7 @@ class GenericController:
                     cancelled = True
                     break
 
-                if self.app and not self.app._can_trigger_commands():
+                if self.app and not self.app._commands_allowed():
                     time.sleep(0.1)
                     continue
 
@@ -3994,6 +3994,8 @@ class iRacingControlApp:
         self.skip_race_restart_once = False
         self.skip_session_scan_once = False
         self.skip_auto_scan_once = False
+        self.skip_on_track_restart_once = False
+        self._on_track_restart_seen = False
         self._last_auto_pair: Tuple[str, str] = ("", "")
         self._session_scan_pending = False
         self._telemetry_active = False
@@ -4050,7 +4052,8 @@ class iRacingControlApp:
         self.auto_scan_on_change = tk.BooleanVar(value=True)
         self.auto_restart_on_rescan = tk.BooleanVar(value=True)
         self.auto_restart_on_race = tk.BooleanVar(value=True)
-        self.block_offtrack_commands = tk.BooleanVar(value=True)
+        self.auto_restart_on_track_ready = tk.BooleanVar(value=True)
+        self.block_off_track_commands = tk.BooleanVar(value=True)
         self.keep_trying_targets = tk.BooleanVar(value=True)
         self.show_scan_popup = tk.BooleanVar(value=False)
         self.auto_save_presets = tk.BooleanVar(value=True)
@@ -4532,6 +4535,13 @@ class iRacingControlApp:
 
         tk.Checkbutton(
             stability_frame,
+            text="Restart + rescan when on-track telemetry goes true",
+            variable=self.auto_restart_on_track_ready,
+            command=self.schedule_save
+        ).pack(anchor="w", padx=8, pady=2)
+
+        tk.Checkbutton(
+            stability_frame,
             text="Show scan completion popup",
             variable=self.show_scan_popup,
             command=self.schedule_save
@@ -4560,8 +4570,8 @@ class iRacingControlApp:
 
         tk.Checkbutton(
             stability_frame,
-            text="Disable commands when IsOnTrackCar is false",
-            variable=self.block_offtrack_commands,
+            text="Block commands when IsOnTrackCar is false",
+            variable=self.block_off_track_commands,
             command=self.schedule_save
         ).pack(anchor="w", padx=8, pady=2)
 
@@ -5486,6 +5496,7 @@ class iRacingControlApp:
             or self.auto_restart_on_race.get()
             or self.auto_scan_on_change.get()
             or self.auto_restart_on_rescan.get()
+            or self.auto_restart_on_track_ready.get()
         ):
             self.root.after(2000, self.auto_preset_loop)
             return
@@ -5518,6 +5529,7 @@ class iRacingControlApp:
                 self.auto_detect.get()
                 or self.auto_scan_on_change.get()
                 or self.auto_restart_on_rescan.get()
+                or self.auto_restart_on_track_ready.get()
             ):
                 self.root.after(2000, self.auto_preset_loop)
                 return
@@ -5540,6 +5552,8 @@ class iRacingControlApp:
 
             raw_track = weekend["TrackDisplayName"]
             telemetry_reconnected = self._set_telemetry_active(True)
+            if self._maybe_restart_on_track_ready():
+                return
 
             # Clean names
             car_clean = "".join(
@@ -5680,6 +5694,32 @@ class iRacingControlApp:
 
         return False
 
+    def _maybe_restart_on_track_ready(self) -> bool:
+        """Restart + rescan when on-track telemetry first becomes true."""
+        if not self.auto_restart_on_track_ready.get():
+            self._on_track_restart_seen = False
+            self.skip_on_track_restart_once = False
+            return False
+
+        is_on_track = self._bool_from_keys(["IsOnTrack"])
+        is_on_track_car = self._bool_from_keys(["IsOnTrackCar"])
+        on_track_now = is_on_track and is_on_track_car
+
+        if self.skip_on_track_restart_once and on_track_now:
+            self.skip_on_track_restart_once = False
+            self._on_track_restart_seen = True
+            return False
+
+        if on_track_now and not self._on_track_restart_seen:
+            self._on_track_restart_seen = True
+            self.manual_restart_scan()
+            return True
+
+        if not on_track_now:
+            self._on_track_restart_seen = False
+
+        return False
+
     def _set_telemetry_active(self, active: bool) -> bool:
         """Track telemetry connection state and report reconnections."""
         if active == self._telemetry_active:
@@ -5706,6 +5746,7 @@ class iRacingControlApp:
         self._telemetry_active = False
         self._last_weekend_key = None
         self._skip_next_auto_load = False
+        self._on_track_restart_seen = False
 
     def _get_weekend_key(self, weekend: Dict[str, Any]) -> Optional[Tuple[Any, ...]]:
         """Return a stable identifier for the current weekend/session."""
@@ -6429,9 +6470,11 @@ class iRacingControlApp:
             self.skip_session_scan_once = True
             self.skip_auto_scan_once = True
             self._pending_scan_silent = silent_scan
+            self.skip_on_track_restart_once = True
 
         if self.pending_scan_on_start:
             self.skip_race_restart_once = True
+            self.skip_on_track_restart_once = True
             self.pending_scan_on_start = False
             self.save_config()
             self.root.after(
@@ -6532,7 +6575,8 @@ class iRacingControlApp:
             "auto_scan_on_change": self.auto_scan_on_change.get(),
             "auto_restart_on_rescan": self.auto_restart_on_rescan.get(),
             "auto_restart_on_race": self.auto_restart_on_race.get(),
-            "block_offtrack_commands": self.block_offtrack_commands.get(),
+            "auto_restart_on_track_ready": self.auto_restart_on_track_ready.get(),
+            "block_off_track_commands": self.block_off_track_commands.get(),
             "auto_save_presets": self.auto_save_presets.get(),
             "lock_preset_selection": self.lock_preset_selection.get(),
             "start_with_windows": self.start_with_windows.get(),
@@ -6597,7 +6641,16 @@ class iRacingControlApp:
         self.auto_scan_on_change.set(data.get("auto_scan_on_change", True))
         self.auto_restart_on_rescan.set(data.get("auto_restart_on_rescan", True))
         self.auto_restart_on_race.set(data.get("auto_restart_on_race", True))
-        self.block_offtrack_commands.set(data.get("block_offtrack_commands", True))
+        self.auto_restart_on_track_ready.set(
+            data.get("auto_restart_on_track_ready", True)
+        )
+        block_setting = data.get(
+            "block_off_track_commands",
+            data.get("block_offtrack_commands", True)
+        )
+        self.block_off_track_commands.set(
+            block_setting if isinstance(block_setting, bool) else True
+        )
         self.auto_save_presets.set(data.get("auto_save_presets", True))
         self.lock_preset_selection.set(data.get("lock_preset_selection", True))
         self.start_with_windows.set(data.get("start_with_windows", False))
@@ -6685,24 +6738,18 @@ class iRacingControlApp:
         except Exception:
             return None
 
-    def _can_trigger_commands(self) -> bool:
+    def _commands_allowed(self) -> bool:
         """Return True when command execution is allowed by safety settings."""
-        if not self.block_offtrack_commands.get():
+        if not self.block_off_track_commands.get():
             return True
-        is_on_track_car = self._read_ir_value("IsOnTrackCar")
-        if is_on_track_car is not None:
-            return bool(is_on_track_car)
-        is_on_track = self._read_ir_value("IsOnTrack")
-        if is_on_track is not None:
-            return bool(is_on_track)
-        return False
+        return self._bool_from_keys(["IsOnTrackCar"])
 
     def _make_single_action(self, controller: GenericController, target: float):
         """Create an action that adjusts a single controller to a target."""
         def action():
             if self.app_state != "RUNNING":
                 return
-            if not self._can_trigger_commands():
+            if not self._commands_allowed():
                 return
             controller.request_target(target)
 
@@ -6714,7 +6761,7 @@ class iRacingControlApp:
         def combo_action():
             if self.app_state != "RUNNING":
                 return
-            if not self._can_trigger_commands():
+            if not self._commands_allowed():
                 return
 
             for var_name, val_str in values.items():

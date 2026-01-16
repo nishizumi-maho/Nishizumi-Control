@@ -20,15 +20,6 @@ An accessibility-focused control manager for iRacing that provides:
 ## Overview
 Dominant Control is a single-file application (`FINALOK.py`) that manages iRacing’s driver-adjustable controls. It includes optional text-to-speech feedback, joystick support, and offline voice control when the related dependencies are installed.
 
-## Release 6.0.0 Highlights
-- See the [release notes](https://github.com/nishizumi-maho/Nishizumi-Control/releases/tag/V6.0.0) for the full change list.
-
-## Release 5.0.0 Highlights
-- **Refreshed layout:** new Main/Options tabs with a guided Step 1–3 setup flow for car/track, device confirmation, and control scanning.
-- **Voice & audio window:** all voice engines, devices, and tuning controls now live in **Options → Voice/Audio Settings**.
-- **Automation & shortcuts:** expanded options for rescan/restart automation plus manual rescan and clear-target hotkeys.
-- **Whisper.cpp support:** optional offline recognition via a local whisper.cpp executable and GGML/GGUF models.
-
 ## Supported Platforms & Requirements
 - **OS:** Windows 10/11 (64-bit)
 - **iRacing:** Valid subscription with telemetry enabled

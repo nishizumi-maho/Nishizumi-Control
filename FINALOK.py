@@ -2399,6 +2399,8 @@ class GenericController:
         self._clear_requested = False
         self._worker_thread: Optional[threading.Thread] = None
         self._float_step: Optional[float] = None
+        self.min_value: Optional[float] = None
+        self.max_value: Optional[float] = None
 
     def read_telemetry(self) -> Optional[float]:
         """
@@ -2493,6 +2495,28 @@ class GenericController:
 
         return aligned
 
+    def _is_limit_target(self, target: float) -> bool:
+        """Return True when the target matches a configured min/max limit."""
+        if self.min_value is None and self.max_value is None:
+            return False
+
+        if self.is_float:
+            tolerance = 0.001
+            if self._float_step and self._float_step > 0:
+                tolerance = max(tolerance, self._float_step / 2.0)
+            if self.min_value is not None and abs(target - self.min_value) <= tolerance:
+                return True
+            if self.max_value is not None and abs(target - self.max_value) <= tolerance:
+                return True
+            return False
+
+        target_int = int(round(target))
+        if self.min_value is not None and target_int == int(round(self.min_value)):
+            return True
+        if self.max_value is not None and target_int == int(round(self.max_value)):
+            return True
+        return False
+
     def request_target(self, target: float):
         """Queue a target adjustment request, overriding any active target."""
         with self._target_lock:
@@ -2582,7 +2606,8 @@ class GenericController:
                     break
 
                 if self.app and not self.app._commands_allowed():
-                    time.sleep(0.0 if is_bot_experimental else 0.1)
+                    if not is_bot_experimental:
+                        time.sleep(0.1)
                     continue
 
                 keep_trying = bool(
@@ -2597,7 +2622,8 @@ class GenericController:
 
                 current = read_fn()
                 if current is None:
-                    time.sleep(0.0 if is_bot_experimental else 0.05)
+                    if not is_bot_experimental:
+                        time.sleep(0.05)
                     continue
 
                 if self.is_float and last_value is not None:
@@ -2607,7 +2633,8 @@ class GenericController:
                             self._float_step = round(delta, 6)
 
                 if active_target is None:
-                    time.sleep(0.0 if is_bot_experimental else 0.05)
+                    if not is_bot_experimental:
+                        time.sleep(0.05)
                     continue
 
                 diff = active_target - current
@@ -2635,12 +2662,28 @@ class GenericController:
 
                 key = self.key_increase if diff > 0 else self.key_decrease
                 if is_bot_profile:
+                    fast_limit = is_bot_experimental and self._is_limit_target(active_target)
                     if self.is_float:
                         base_step = self._float_step if self._float_step else 0.001
                     else:
                         base_step = 1.0
 
                     close_threshold = max(0.001, base_step)
+                    if fast_limit:
+                        if not self.is_float and abs_diff > 5:
+                            burst = min(10, int(abs_diff / 2))
+                            for _ in range(burst):
+                                press_key(key)
+                                release_key(key)
+                            time.sleep(0.01)
+                        else:
+                            press_key(key)
+                            release_key(key)
+                            if abs_diff <= 2:
+                                time.sleep(0.005)
+                        last_diff = diff
+                        last_value = current
+                        continue
                     if is_bot_experimental:
                         click_pulse(key, self.is_float)
                     elif abs_diff <= close_threshold * 2 or overshot:
@@ -2830,6 +2873,29 @@ class ControlTab(tk.Frame):
         self.lbl_status = tk.Label(body, text="Idle", fg="gray")
         self.lbl_status.pack()
 
+        # Min/Max configuration
+        limits_frame = tk.LabelFrame(
+            body,
+            text="Limits (min/max)",
+            padx=5,
+            pady=5
+        )
+        limits_frame.pack(fill="x", padx=5, pady=5)
+
+        tk.Label(limits_frame, text="Min:").pack(side="left", padx=(2, 4))
+        self.entry_min_value = ttk.Entry(limits_frame, width=10)
+        self.entry_min_value.pack(side="left", padx=(0, 10))
+        self._bind_limit_entry(self.entry_min_value)
+
+        tk.Label(limits_frame, text="Max:").pack(side="left", padx=(2, 4))
+        self.entry_max_value = ttk.Entry(limits_frame, width=10)
+        self.entry_max_value.pack(side="left")
+        self._bind_limit_entry(self.entry_max_value)
+
+        if self.app.app_state != "CONFIG":
+            self.entry_min_value.config(state="readonly")
+            self.entry_max_value.config(state="readonly")
+
         # Presets/Macros
         presets_frame = tk.LabelFrame(
             body, 
@@ -2933,6 +2999,52 @@ class ControlTab(tk.Frame):
             lambda _event: self.app.schedule_preset_save()
         )
 
+    def _bind_limit_entry(self, entry: tk.Entry) -> None:
+        """Bind limit entries to auto-save and controller updates."""
+        self._bind_autosave_entry(entry)
+        entry.bind(
+            "<KeyRelease>",
+            lambda _event: self._sync_controller_limits(),
+            add="+"
+        )
+        entry.bind(
+            "<FocusOut>",
+            lambda _event: self._sync_controller_limits(),
+            add="+"
+        )
+
+    def _parse_limit_value(self, raw_value: str) -> Optional[float]:
+        """Parse a limit entry string into a numeric value."""
+        text = raw_value.strip()
+        if not text:
+            return None
+
+        try:
+            numeric = float(text)
+        except ValueError:
+            return None
+
+        if self.controller.is_float:
+            return numeric
+        return float(int(round(numeric)))
+
+    def _sync_controller_limits(self) -> None:
+        """Update controller min/max values from UI entries."""
+        self.controller.min_value = self._parse_limit_value(
+            self.entry_min_value.get()
+        )
+        self.controller.max_value = self._parse_limit_value(
+            self.entry_max_value.get()
+        )
+
+    def _apply_limit_entry(self, entry: tk.Entry, value: Optional[float]) -> None:
+        entry.config(state="normal")
+        entry.delete(0, tk.END)
+        if value is not None:
+            entry.insert(0, str(value))
+        if self.app.app_state != "CONFIG":
+            entry.config(state="readonly")
+
     def run_bot_timing_probe(self):
         """Run a fast timing probe to suggest a stable BOT delay."""
 
@@ -2981,6 +3093,10 @@ class ControlTab(tk.Frame):
                 pass
         if self.btn_add_preset_row:
             self.btn_add_preset_row.config(state=button_state)
+        if self.entry_min_value:
+            self.entry_min_value.config(state=state)
+        if self.entry_max_value:
+            self.entry_max_value.config(state=state)
 
     def bind_game_key(self, direction: str):
         """
@@ -3174,6 +3290,7 @@ class ControlTab(tk.Frame):
 
     def get_config(self) -> Dict[str, Any]:
         """Get current configuration."""
+        self._sync_controller_limits()
         return {
             "meta_var": self.controller.var_name,
             "meta_float": self.controller.is_float,
@@ -3181,6 +3298,8 @@ class ControlTab(tk.Frame):
             "key_increase_text": self.btn_increase["text"],
             "key_decrease": self.controller.key_decrease,
             "key_decrease_text": self.btn_decrease["text"],
+            "min_value": self.controller.min_value,
+            "max_value": self.controller.max_value,
             "presets": [
                 {
                     "val": row["entry"].get(),
@@ -3196,7 +3315,10 @@ class ControlTab(tk.Frame):
 
     def get_value_config(self) -> Dict[str, Any]:
         """Get preset values/phrases without bindings."""
+        self._sync_controller_limits()
         return {
+            "min_value": self.controller.min_value,
+            "max_value": self.controller.max_value,
             "presets": [
                 {
                     "val": row["entry"].get(),
@@ -3248,6 +3370,12 @@ class ControlTab(tk.Frame):
         self.btn_increase.config(text=config.get("key_increase_text", "Set Increase (+)"))
         self.btn_decrease.config(text=config.get("key_decrease_text", "Set Decrease (-)"))
 
+        min_value = config.get("min_value")
+        max_value = config.get("max_value")
+        self._apply_limit_entry(self.entry_min_value, min_value)
+        self._apply_limit_entry(self.entry_max_value, max_value)
+        self._sync_controller_limits()
+
         # Clear and rebuild preset rows
         for row in list(self.preset_rows):
             row["frame"].destroy()
@@ -3272,7 +3400,14 @@ class ControlTab(tk.Frame):
 
         saved_presets = config.get("presets", [])
         if not saved_presets:
-            return
+            saved_presets = []
+
+        min_value = config.get("min_value")
+        max_value = config.get("max_value")
+        if min_value is not None or max_value is not None:
+            self._apply_limit_entry(self.entry_min_value, min_value)
+            self._apply_limit_entry(self.entry_max_value, max_value)
+            self._sync_controller_limits()
 
         reset_rows = [row for row in self.preset_rows if row.get("is_reset")]
         normal_rows = [row for row in self.preset_rows if not row.get("is_reset")]

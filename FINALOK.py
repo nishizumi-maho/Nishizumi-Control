@@ -11,7 +11,7 @@ A comprehensive control management application for iRacing that provides:
 
 Author: Nishizumi Maho
 All Rights Reserved
-Version: 6.0.0
+Version: 7.0.0
 """
 
 import tkinter as tk

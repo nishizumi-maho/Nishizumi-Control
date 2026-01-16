@@ -266,6 +266,18 @@ DEFAULT_OVERLAY_FEEDBACK = {
     "cooldown_s": 6.0
 }
 
+TRACK_PRESET_CONDITIONS = ("DRY", "WET")
+DEFAULT_TRACK_CONDITION = "DRY"
+
+
+def _blank_track_preset() -> Dict[str, Any]:
+    """Return a fresh default preset payload for a track condition."""
+    return {
+        "active_vars": None,
+        "tabs": {},
+        "combo": {}
+    }
+
 # Timing profiles for input simulation (click-click timing)
 GLOBAL_TIMING = {
     "profile": "bot",  # "aggressive", "casual", "relaxed", "custom", "bot", "bot_safe"
@@ -3957,7 +3969,7 @@ class iRacingControlApp:
         self.overlay_tab: Optional[OverlayConfigTab] = None
         self.voice_window: Optional[tk.Toplevel] = None
 
-        # Presets: saved_presets[car][track] = config
+        # Presets: saved_presets[car][track] = {"conditions": {...}, ...}
         self.saved_presets: Dict[str, Dict[str, Dict[str, Any]]] = {}
         
         # Overlay config per car
@@ -3981,6 +3993,7 @@ class iRacingControlApp:
         # Current car and track
         self.current_car = ""
         self.current_track = ""
+        self.current_track_condition = DEFAULT_TRACK_CONDITION
         self.last_session_type = ""
         self.last_session_num: Optional[int] = None
         self.scans_since_restart = 0
@@ -4021,6 +4034,7 @@ class iRacingControlApp:
         self.vosk_status_var = tk.StringVar(value="")
         self.whisper_status_var = tk.StringVar(value="")
         self.voice_engine_combo: Optional[ttk.Combobox] = None
+        self.combo_condition: Optional[ttk.Combobox] = None
         self.btn_vosk_model: Optional[tk.Button] = None
         self.btn_whisper_binary: Optional[tk.Button] = None
         self.btn_whisper_model: Optional[tk.Button] = None
@@ -4055,10 +4069,17 @@ class iRacingControlApp:
         self.start_with_windows = tk.BooleanVar(value=False)
         self.focus_on_startup = tk.BooleanVar(value=True)
         self.show_getting_started = tk.BooleanVar(value=True)
+        self.track_condition_var = tk.StringVar(value=DEFAULT_TRACK_CONDITION)
         self.clear_target_bind: Optional[str] = None
         self.btn_clear_target_bind: Optional[tk.Button] = None
         self.manual_rescan_bind: Optional[str] = None
         self.btn_manual_rescan_bind: Optional[tk.Button] = None
+        self.toggle_track_condition_bind: Optional[str] = None
+        self.btn_toggle_track_condition_bind: Optional[tk.Button] = None
+        self.set_dry_track_condition_bind: Optional[str] = None
+        self.btn_set_dry_track_condition_bind: Optional[tk.Button] = None
+        self.set_wet_track_condition_bind: Optional[str] = None
+        self.btn_set_wet_track_condition_bind: Optional[tk.Button] = None
         self.voice_phrase_map: Dict[str, Callable] = {}
         self._voice_traces_attached = False
         self._auto_save_job: Optional[str] = None
@@ -4345,6 +4366,18 @@ class iRacingControlApp:
         tk.Label(selector_frame, text="Track:").pack(side="left")
         self.combo_track = ttk.Combobox(selector_frame, width=30)
         self.combo_track.pack(side="left", padx=5)
+        self.combo_track.bind("<<ComboboxSelected>>", self.on_track_selected)
+
+        tk.Label(selector_frame, text="Condition:").pack(side="left")
+        self.combo_condition = ttk.Combobox(
+            selector_frame,
+            width=8,
+            values=list(TRACK_PRESET_CONDITIONS),
+            textvariable=self.track_condition_var,
+            state="readonly"
+        )
+        self.combo_condition.pack(side="left", padx=5)
+        self.combo_condition.bind("<<ComboboxSelected>>", self.on_condition_selected)
 
         actions_frame = tk.Frame(presets_frame)
         actions_frame.pack(fill="x", padx=5, pady=5)
@@ -4597,6 +4630,45 @@ class iRacingControlApp:
         )
         self.btn_manual_rescan_bind.pack(side="left", padx=6)
 
+        condition_frame = tk.LabelFrame(
+            stability_frame,
+            text="Dry/Wet Preset Hotkeys"
+        )
+        condition_frame.pack(fill="x", padx=8, pady=(0, 8))
+
+        toggle_frame = tk.Frame(condition_frame)
+        toggle_frame.pack(fill="x", padx=6, pady=(6, 2))
+        tk.Label(toggle_frame, text="Toggle DRY/WET:").pack(side="left")
+        self.btn_toggle_track_condition_bind = tk.Button(
+            toggle_frame,
+            text="Set Toggle Hotkey",
+            width=18,
+            command=self._set_toggle_track_condition_bind
+        )
+        self.btn_toggle_track_condition_bind.pack(side="left", padx=6)
+
+        dry_frame = tk.Frame(condition_frame)
+        dry_frame.pack(fill="x", padx=6, pady=2)
+        tk.Label(dry_frame, text="Set DRY directly:").pack(side="left")
+        self.btn_set_dry_track_condition_bind = tk.Button(
+            dry_frame,
+            text="Set DRY Hotkey",
+            width=18,
+            command=self._set_dry_track_condition_bind
+        )
+        self.btn_set_dry_track_condition_bind.pack(side="left", padx=6)
+
+        wet_frame = tk.Frame(condition_frame)
+        wet_frame.pack(fill="x", padx=6, pady=(2, 6))
+        tk.Label(wet_frame, text="Set WET directly:").pack(side="left")
+        self.btn_set_wet_track_condition_bind = tk.Button(
+            wet_frame,
+            text="Set WET Hotkey",
+            width=18,
+            command=self._set_wet_track_condition_bind
+        )
+        self.btn_set_wet_track_condition_bind.pack(side="left", padx=6)
+
         # Initialize with default variables if none exist
         if not self.active_vars:
             self.active_vars = [("dcBrakeBias", True)]
@@ -4605,6 +4677,7 @@ class iRacingControlApp:
         self.update_preset_ui()
         self._refresh_clear_target_bind_button()
         self._refresh_manual_rescan_bind_button()
+        self._refresh_track_condition_bind_buttons()
 
     def open_getting_started_window(self) -> None:
         """Open the getting started guide in a popup window."""
@@ -5110,6 +5183,40 @@ class iRacingControlApp:
                 bg="#f0f0f0"
             )
 
+    def _refresh_track_condition_bind_button(
+        self,
+        button: Optional[tk.Button],
+        bind: Optional[str],
+        default_text: str
+    ) -> None:
+        """Update the DRY/WET hotkey button text/color."""
+        if not button:
+            return
+
+        if bind:
+            bg_color = "#90ee90" if "JOY" in bind else "#ADD8E6"
+            button.config(text=bind, bg=bg_color)
+        else:
+            button.config(text=default_text, bg="#f0f0f0")
+
+    def _refresh_track_condition_bind_buttons(self) -> None:
+        """Refresh all DRY/WET hotkey buttons."""
+        self._refresh_track_condition_bind_button(
+            self.btn_toggle_track_condition_bind,
+            self.toggle_track_condition_bind,
+            "Set Toggle Hotkey"
+        )
+        self._refresh_track_condition_bind_button(
+            self.btn_set_dry_track_condition_bind,
+            self.set_dry_track_condition_bind,
+            "Set DRY Hotkey"
+        )
+        self._refresh_track_condition_bind_button(
+            self.btn_set_wet_track_condition_bind,
+            self.set_wet_track_condition_bind,
+            "Set WET Hotkey"
+        )
+
     def _collect_hotkey_binds(self) -> List[str]:
         binds: List[str] = []
         for tab in self.tabs.values():
@@ -5126,6 +5233,12 @@ class iRacingControlApp:
             binds.append(self.clear_target_bind)
         if self.manual_rescan_bind:
             binds.append(self.manual_rescan_bind)
+        if self.toggle_track_condition_bind:
+            binds.append(self.toggle_track_condition_bind)
+        if self.set_dry_track_condition_bind:
+            binds.append(self.set_dry_track_condition_bind)
+        if self.set_wet_track_condition_bind:
+            binds.append(self.set_wet_track_condition_bind)
         return binds
 
     def is_hotkey_available(
@@ -5178,6 +5291,38 @@ class iRacingControlApp:
             controller.clear_target()
         self.notify_overlay_status("Targets cleared", "orange")
 
+    def toggle_track_condition(self) -> None:
+        """Toggle between DRY and WET presets for the current track."""
+        current = self.current_track_condition or DEFAULT_TRACK_CONDITION
+        next_condition = "WET" if current == "DRY" else "DRY"
+        self.ui(
+            self._set_track_condition,
+            next_condition,
+            announce=True,
+            persist=True,
+            load_preset=True
+        )
+
+    def set_track_condition_dry(self) -> None:
+        """Switch directly to DRY presets for the current track."""
+        self.ui(
+            self._set_track_condition,
+            "DRY",
+            announce=True,
+            persist=True,
+            load_preset=True
+        )
+
+    def set_track_condition_wet(self) -> None:
+        """Switch directly to WET presets for the current track."""
+        self.ui(
+            self._set_track_condition,
+            "WET",
+            announce=True,
+            persist=True,
+            load_preset=True
+        )
+
     def _set_manual_rescan_bind(self):
         """Capture an optional hotkey for manual restart + rescan."""
         if self.app_state != "CONFIG":
@@ -5208,6 +5353,63 @@ class iRacingControlApp:
         if self.app_state == "RUNNING":
             self.register_current_listeners()
         self.schedule_save()
+
+    def _set_track_condition_bind(
+        self,
+        attr_name: str,
+        button: Optional[tk.Button]
+    ) -> None:
+        """Capture an optional hotkey for DRY/WET selection."""
+        if self.app_state != "CONFIG":
+            messagebox.showinfo("Notice", "Enter CONFIG mode first.")
+            return
+
+        self.focus_window()
+        if button:
+            button.config(text="...", bg="yellow")
+        self.root.update_idletasks()
+
+        code = input_manager.capture_any_input()
+        current = getattr(self, attr_name)
+
+        if code and code != "CANCEL":
+            if not self.is_hotkey_available(code, current=current):
+                messagebox.showwarning(
+                    "Hotkey in use",
+                    "That hotkey is already assigned. "
+                    "Clear the existing bind before reusing it."
+                )
+                self._refresh_track_condition_bind_buttons()
+                return
+            setattr(self, attr_name, code)
+        elif code == "CANCEL":
+            setattr(self, attr_name, None)
+
+        self._refresh_track_condition_bind_buttons()
+        if self.app_state == "RUNNING":
+            self.register_current_listeners()
+        self.schedule_save()
+
+    def _set_toggle_track_condition_bind(self) -> None:
+        """Capture an optional hotkey for toggling DRY/WET presets."""
+        self._set_track_condition_bind(
+            "toggle_track_condition_bind",
+            self.btn_toggle_track_condition_bind
+        )
+
+    def _set_dry_track_condition_bind(self) -> None:
+        """Capture an optional hotkey for switching to DRY presets."""
+        self._set_track_condition_bind(
+            "set_dry_track_condition_bind",
+            self.btn_set_dry_track_condition_bind
+        )
+
+    def _set_wet_track_condition_bind(self) -> None:
+        """Capture an optional hotkey for switching to WET presets."""
+        self._set_track_condition_bind(
+            "set_wet_track_condition_bind",
+            self.btn_set_wet_track_condition_bind
+        )
 
     def manual_restart_scan(self):
         """Restart the app and trigger a scan + preset reload."""
@@ -5274,6 +5476,105 @@ class iRacingControlApp:
         self.save_config()
 
     # Car/Track/Preset management
+    def _ensure_track_condition_entry(self, car: str, track: str) -> Dict[str, Any]:
+        """Return normalized track preset data with DRY/WET conditions."""
+        if car not in self.saved_presets:
+            self.saved_presets[car] = {}
+
+        track_entry = self.saved_presets[car].get(track)
+        if not track_entry:
+            track_entry = {
+                "active_condition": DEFAULT_TRACK_CONDITION,
+                "conditions": {
+                    condition: _blank_track_preset()
+                    for condition in TRACK_PRESET_CONDITIONS
+                }
+            }
+            self.saved_presets[car][track] = track_entry
+            return track_entry
+
+        if "conditions" not in track_entry:
+            track_entry = {
+                "active_condition": DEFAULT_TRACK_CONDITION,
+                "conditions": {
+                    DEFAULT_TRACK_CONDITION: track_entry,
+                    "WET": _blank_track_preset()
+                }
+            }
+            self.saved_presets[car][track] = track_entry
+            return track_entry
+
+        conditions = track_entry.get("conditions", {})
+        for condition in TRACK_PRESET_CONDITIONS:
+            if condition not in conditions:
+                conditions[condition] = _blank_track_preset()
+        track_entry["conditions"] = conditions
+        if track_entry.get("active_condition") not in TRACK_PRESET_CONDITIONS:
+            track_entry["active_condition"] = DEFAULT_TRACK_CONDITION
+
+        return track_entry
+
+    def _get_active_pair(self) -> Tuple[str, str]:
+        """Return the active car/track pair from UI or telemetry."""
+        car = (self.current_car or self.combo_car.get().strip()).strip()
+        track = (self.current_track or self.combo_track.get().strip()).strip()
+        return car, track
+
+    def _set_track_condition_state(self, condition: str) -> None:
+        """Update tracked condition state and UI."""
+        self.current_track_condition = condition
+        self.track_condition_var.set(condition)
+        if self.combo_condition:
+            self.combo_condition.set(condition)
+
+    def _sync_condition_for_pair(self, car: str, track: str) -> None:
+        """Sync condition selector to stored track condition."""
+        if not car or not track:
+            return
+        track_entry = self._ensure_track_condition_entry(car, track)
+        condition = track_entry.get("active_condition", DEFAULT_TRACK_CONDITION)
+        self._set_track_condition_state(condition)
+
+    def _set_track_condition(
+        self,
+        condition: str,
+        *,
+        announce: bool = False,
+        persist: bool = True,
+        load_preset: bool = True
+    ) -> None:
+        """Switch the active DRY/WET preset for the current car/track."""
+        condition = condition.upper()
+        if condition not in TRACK_PRESET_CONDITIONS:
+            return
+
+        car, track = self._get_active_pair()
+        if not car or not track:
+            return
+
+        track_entry = self._ensure_track_condition_entry(car, track)
+        track_entry["active_condition"] = condition
+        self._set_track_condition_state(condition)
+
+        if load_preset:
+            self.load_specific_preset(car, track, condition=condition)
+
+        if persist:
+            self.save_config()
+
+        if announce:
+            self.notify_overlay_status(f"Preset {condition}", "green")
+
+    def _normalize_saved_presets(self) -> None:
+        """Ensure all saved presets include DRY/WET condition containers."""
+        for car, tracks in list(self.saved_presets.items()):
+            if not isinstance(tracks, dict):
+                continue
+            for track in list(tracks.keys()):
+                if track in {"_overlay", "_overlay_feedback"}:
+                    continue
+                self._ensure_track_condition_entry(car, track)
+
     def update_preset_ui(self):
         """Update car/track combo boxes."""
         cars = sorted(list(self.saved_presets.keys()))
@@ -5296,6 +5597,9 @@ class iRacingControlApp:
         state = "disabled" if locked else "normal"
         self.combo_car.configure(state=state)
         self.combo_track.configure(state=state)
+        if self.combo_condition:
+            condition_state = "disabled" if locked else "readonly"
+            self.combo_condition.configure(state=condition_state)
         load_state = tk.DISABLED if locked else tk.NORMAL
         self.btn_load_preset.configure(state=load_state)
         self.btn_save_preset.configure(state=tk.NORMAL)
@@ -5314,6 +5618,20 @@ class iRacingControlApp:
             self.combo_track["values"] = []
 
         self.current_car = car
+        if self.current_track:
+            self._sync_condition_for_pair(car, self.current_track)
+
+    def on_track_selected(self, _event):
+        """Handle track selection."""
+        track = self.combo_track.get()
+        self.current_track = track
+        self._sync_condition_for_pair(self.current_car, track)
+
+    def on_condition_selected(self, _event):
+        """Handle manual condition selection from the UI."""
+        condition = self.combo_condition.get() if self.combo_condition else ""
+        if condition:
+            self._set_track_condition(condition, persist=True, load_preset=True)
 
     def auto_fill_ui(self, car: str, track: str):
         """Auto-fill car and track in UI."""
@@ -5323,6 +5641,7 @@ class iRacingControlApp:
         self.combo_car.set(car)
         self.on_car_selected(None)
         self.combo_track.set(track)
+        self._sync_condition_for_pair(car, track)
 
     def action_save_preset(self):
         """Save current configuration as preset."""
@@ -5358,10 +5677,16 @@ class iRacingControlApp:
         for var_name, tab in self.tabs.items():
             current_data["tabs"][var_name] = tab.get_config()
 
-        if car not in self.saved_presets:
-            self.saved_presets[car] = {}
-
-        self.saved_presets[car][track] = current_data
+        track_entry = self._ensure_track_condition_entry(car, track)
+        condition = (
+            self.current_track_condition
+            or self.track_condition_var.get()
+            or DEFAULT_TRACK_CONDITION
+        )
+        if condition not in TRACK_PRESET_CONDITIONS:
+            condition = DEFAULT_TRACK_CONDITION
+        track_entry["active_condition"] = condition
+        track_entry["conditions"][condition] = current_data
 
         # Save overlay config
         if car not in self.car_overlay_config:
@@ -5380,12 +5705,23 @@ class iRacingControlApp:
         if show_message:
             messagebox.showinfo("Saved", f"Preset saved for {car} @ {track}")
 
-    def load_specific_preset(self, car: str, track: str):
+    def load_specific_preset(
+        self,
+        car: str,
+        track: str,
+        condition: Optional[str] = None
+    ):
         """Load a specific car/track preset."""
         if car not in self.saved_presets or track not in self.saved_presets[car]:
             return
 
-        data = self.saved_presets[car][track]
+        track_entry = self._ensure_track_condition_entry(car, track)
+        condition = (condition or track_entry.get("active_condition")).upper()
+        if condition not in TRACK_PRESET_CONDITIONS:
+            condition = DEFAULT_TRACK_CONDITION
+        track_entry["active_condition"] = condition
+        self._set_track_condition_state(condition)
+        data = track_entry["conditions"].get(condition, _blank_track_preset())
 
         # Load active variables
         active_vars = data.get("active_vars")
@@ -5420,32 +5756,42 @@ class iRacingControlApp:
         """Load selected preset."""
         car = self.combo_car.get()
         track = self.combo_track.get()
+        condition = (
+            self.combo_condition.get()
+            if self.combo_condition
+            else self.current_track_condition
+        )
 
         if not car or not track:
             return
 
         self.current_car = car
         self.current_track = track
-        self.load_specific_preset(car, track)
+        self.load_specific_preset(car, track, condition=condition)
 
     def action_clear_preset(self):
         """Clear selected preset."""
         car = self.combo_car.get()
         track = self.combo_track.get()
+        condition = (
+            self.combo_condition.get()
+            if self.combo_condition
+            else self.current_track_condition
+        )
 
         if not car or not track:
             return
 
         if car in self.saved_presets and track in self.saved_presets[car]:
+            label = condition if condition in TRACK_PRESET_CONDITIONS else "DRY"
             if not messagebox.askyesno(
-                "Confirm", 
-                f"Clear preset for {car} @ {track}?"
+                "Confirm",
+                f"Clear {label} preset for {car} @ {track}?"
             ):
                 return
 
-            del self.saved_presets[car][track]
-            self.save_config()
             self.rebuild_tabs(list(self.active_vars))
+            self._set_track_condition_state(label)
             self._save_preset_for_pair(car, track, show_message=False)
 
     def _build_preset_values_payload(self) -> Dict[str, Any]:
@@ -5455,6 +5801,7 @@ class iRacingControlApp:
             "app": APP_NAME,
             "car": self.combo_car.get().strip(),
             "track": self.combo_track.get().strip(),
+            "condition": self.current_track_condition,
             "active_vars": self.active_vars,
             "tabs": {
                 var_name: tab.get_value_config()
@@ -5637,12 +5984,13 @@ class iRacingControlApp:
                             car_clean, DEFAULT_OVERLAY_FEEDBACK.copy()
                         )
 
-                if track_clean not in self.saved_presets[car_clean]:
-                    self.saved_presets[car_clean][track_clean] = {
-                        "active_vars": None,
-                        "tabs": {},
-                        "combo": {}
-                    }
+                track_entry = self._ensure_track_condition_entry(
+                    car_clean,
+                    track_clean
+                )
+                self._set_track_condition_state(
+                    track_entry.get("active_condition", DEFAULT_TRACK_CONDITION)
+                )
 
                 self.save_config()
 
@@ -5651,10 +5999,18 @@ class iRacingControlApp:
                     self.auto_load_attempted.add((car_clean, track_clean))
                     if self._skip_next_auto_load:
                         self._skip_next_auto_load = False
-                    elif self.saved_presets[car_clean][track_clean].get(
-                        "active_vars"
-                    ):
-                        self.load_specific_preset(car_clean, track_clean)
+                    else:
+                        condition = track_entry.get(
+                            "active_condition",
+                            DEFAULT_TRACK_CONDITION
+                        )
+                        condition_data = track_entry["conditions"].get(condition, {})
+                        if condition_data.get("active_vars"):
+                            self.load_specific_preset(
+                                car_clean,
+                                track_clean,
+                                condition=condition
+                            )
             elif telemetry_reconnected:
                 self._schedule_session_scan()
 
@@ -5893,7 +6249,16 @@ class iRacingControlApp:
             track = (self.combo_track.get().strip() or self.current_track).strip()
             if car and track and car in self.saved_presets:
                 if track in self.saved_presets[car]:
-                    self.load_specific_preset(car, track)
+                    track_entry = self._ensure_track_condition_entry(car, track)
+                    condition = track_entry.get(
+                        "active_condition",
+                        DEFAULT_TRACK_CONDITION
+                    )
+                    self.load_specific_preset(
+                        car,
+                        track,
+                        condition=condition
+                    )
 
         self.scan_driver_controls(on_complete=_finish_auto_load)
 
@@ -6157,17 +6522,12 @@ class iRacingControlApp:
         self.current_car, self.current_track = car, track
         self.auto_fill_ui(car, track)
 
-        if car not in self.saved_presets:
-            self.saved_presets[car] = {}
-
-        if track not in self.saved_presets[car]:
-            self.saved_presets[car][track] = {
-                "active_vars": self.active_vars,
-                "tabs": {},
-                "combo": {}
-            }
-        else:
-            self.saved_presets[car][track]["active_vars"] = self.active_vars
+        track_entry = self._ensure_track_condition_entry(car, track)
+        condition = track_entry.get("active_condition", DEFAULT_TRACK_CONDITION)
+        if condition not in TRACK_PRESET_CONDITIONS:
+            condition = DEFAULT_TRACK_CONDITION
+        track_entry["active_condition"] = condition
+        track_entry["conditions"][condition]["active_vars"] = self.active_vars
 
         # Overlay config
         if "_overlay" not in self.saved_presets[car]:
@@ -6191,10 +6551,10 @@ class iRacingControlApp:
         )
 
         # Reload saved bindings/macros for this car/track so they remain active
-        preset_data = self.saved_presets[car][track]
-        if preset_data.get("tabs") or preset_data.get("combo"):
+        condition_data = track_entry["conditions"].get(condition, {})
+        if condition_data.get("tabs") or condition_data.get("combo"):
             # Load preset will rebuild tabs with configs and re-register listeners
-            self.load_specific_preset(car, track)
+            self.load_specific_preset(car, track, condition=condition)
         else:
             # Even without saved presets, ensure any current bindings stay active.
             # If this rescan is for the same car/track, reuse inline config.
@@ -6627,6 +6987,9 @@ class iRacingControlApp:
             "show_getting_started": self.show_getting_started.get(),
             "clear_target_bind": self.clear_target_bind,
             "manual_rescan_bind": self.manual_rescan_bind,
+            "toggle_track_condition_bind": self.toggle_track_condition_bind,
+            "set_dry_track_condition_bind": self.set_dry_track_condition_bind,
+            "set_wet_track_condition_bind": self.set_wet_track_condition_bind,
             "pending_scan_on_start": self.pending_scan_on_start,
             "rescan_restart_pair": list(self._rescan_restart_pair),
             "allowed_devices": input_manager.allowed_devices,
@@ -6635,7 +6998,8 @@ class iRacingControlApp:
             "car_overlay_feedback": self.car_overlay_feedback,
             "active_vars": self.active_vars,
             "current_car": self.current_car,
-            "current_track": self.current_track
+            "current_track": self.current_track,
+            "current_track_condition": self.current_track_condition
         }
 
         try:
@@ -6701,6 +7065,9 @@ class iRacingControlApp:
         self.show_getting_started.set(data.get("show_getting_started", True))
         self.clear_target_bind = data.get("clear_target_bind")
         self.manual_rescan_bind = data.get("manual_rescan_bind")
+        self.toggle_track_condition_bind = data.get("toggle_track_condition_bind")
+        self.set_dry_track_condition_bind = data.get("set_dry_track_condition_bind")
+        self.set_wet_track_condition_bind = data.get("set_wet_track_condition_bind")
         self.pending_scan_on_start = data.get("pending_scan_on_start", False)
         pair = data.get("rescan_restart_pair", ["", ""])
         if isinstance(pair, (list, tuple)) and len(pair) == 2:
@@ -6709,6 +7076,7 @@ class iRacingControlApp:
         input_manager.allowed_devices = data.get("allowed_devices", [])
 
         self.saved_presets = data.get("saved_presets", {})
+        self._normalize_saved_presets()
         self.car_overlay_config = data.get("car_overlay_config", {})
         self.car_overlay_feedback = data.get(
             "car_overlay_feedback", self.car_overlay_feedback
@@ -6716,6 +7084,12 @@ class iRacingControlApp:
         self.active_vars = data.get("active_vars", [])
         self.current_car = data.get("current_car", "")
         self.current_track = data.get("current_track", "")
+        self.current_track_condition = data.get(
+            "current_track_condition",
+            DEFAULT_TRACK_CONDITION
+        )
+        self.track_condition_var.set(self.current_track_condition)
+        self._sync_condition_for_pair(self.current_car, self.current_track)
 
     def _set_voice_tuning_vars(self, tuning: Dict[str, Any]):
         """Populate Tk variables with stored voice tuning values."""
@@ -7111,6 +7485,33 @@ class iRacingControlApp:
                 self._hotkey_handles.append(handle)
             else:
                 input_manager.listeners[self.manual_rescan_bind] = action
+
+        if self.toggle_track_condition_bind and allow_input:
+            action = self.toggle_track_condition
+            if self.toggle_track_condition_bind.startswith("KEY:"):
+                key_name = self.toggle_track_condition_bind.split(":", 1)[1].lower()
+                handle = keyboard.add_hotkey(key_name, action)
+                self._hotkey_handles.append(handle)
+            else:
+                input_manager.listeners[self.toggle_track_condition_bind] = action
+
+        if self.set_dry_track_condition_bind and allow_input:
+            action = self.set_track_condition_dry
+            if self.set_dry_track_condition_bind.startswith("KEY:"):
+                key_name = self.set_dry_track_condition_bind.split(":", 1)[1].lower()
+                handle = keyboard.add_hotkey(key_name, action)
+                self._hotkey_handles.append(handle)
+            else:
+                input_manager.listeners[self.set_dry_track_condition_bind] = action
+
+        if self.set_wet_track_condition_bind and allow_input:
+            action = self.set_track_condition_wet
+            if self.set_wet_track_condition_bind.startswith("KEY:"):
+                key_name = self.set_wet_track_condition_bind.split(":", 1)[1].lower()
+                handle = keyboard.add_hotkey(key_name, action)
+                self._hotkey_handles.append(handle)
+            else:
+                input_manager.listeners[self.set_wet_track_condition_bind] = action
 
         input_manager.active = allow_input
         if self.app_state != "RUNNING":

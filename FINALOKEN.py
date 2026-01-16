@@ -3021,6 +3021,14 @@ class ControlTab(tk.Frame):
 
     def _config_bind_button(self, button: tk.Button, data_store: Dict[str, Any]):
         """Configure binding button behavior."""
+        def apply_button_state(bind_code: Optional[str]) -> None:
+            default_text = data_store.get("default_bind_text", "Set Bind")
+            if bind_code:
+                bg_color = "#90ee90" if "JOY" in bind_code else "#ADD8E6"
+                button.config(text=bind_code, bg=bg_color)
+            else:
+                button.config(text=default_text, bg="#f0f0f0")
+
         def on_click():
             if self.app.app_state != "CONFIG":
                 messagebox.showinfo("Notice", "Enter CONFIG mode first.")
@@ -3031,15 +3039,23 @@ class ControlTab(tk.Frame):
             button.config(text="...", bg="yellow")
             self.update_idletasks()
 
+            previous_bind = data_store.get("bind")
             code = input_manager.capture_any_input()
 
             if code and code != "CANCEL":
+                if not self.app.is_hotkey_available(code, current=previous_bind):
+                    messagebox.showwarning(
+                        "Hotkey in use",
+                        "That hotkey is already assigned. "
+                        "Clear the existing bind before reusing it."
+                    )
+                    apply_button_state(previous_bind)
+                    return
                 data_store["bind"] = code
-                bg_color = "#90ee90" if "JOY" in code else "#ADD8E6"
-                button.config(text=code, bg=bg_color)
+                apply_button_state(code)
             elif code == "CANCEL":
                 data_store["bind"] = None
-                button.config(text="Set Bind", bg="#f0f0f0")
+                apply_button_state(None)
 
             self.app.schedule_preset_save()
 
@@ -3086,7 +3102,8 @@ class ControlTab(tk.Frame):
             "bind": None,
             "is_reset": is_reset,
             "voice_entry": voice_entry,
-            "delete_button": None
+            "delete_button": None,
+            "default_bind_text": "Set Bind"
         }
         self._config_bind_button(bind_button, row_data)
 
@@ -3427,6 +3444,14 @@ class ComboTab(tk.Frame):
 
     def _config_bind_button(self, button: tk.Button, data_store: Dict[str, Any]):
         """Configure binding button behavior."""
+        def apply_button_state(bind_code: Optional[str]) -> None:
+            default_text = data_store.get("default_bind_text", "Set Bind")
+            if bind_code:
+                bg_color = "#90ee90" if "JOY" in bind_code else "#ADD8E6"
+                button.config(text=bind_code, bg=bg_color)
+            else:
+                button.config(text=default_text, bg="#f0f0f0")
+
         def on_click():
             if self.app.app_state != "CONFIG":
                 messagebox.showinfo("Notice", "Enter CONFIG mode first.")
@@ -3437,15 +3462,23 @@ class ComboTab(tk.Frame):
             button.config(text="...", bg="yellow")
             self.update_idletasks()
 
+            previous_bind = data_store.get("bind")
             code = input_manager.capture_any_input()
 
             if code and code != "CANCEL":
+                if not self.app.is_hotkey_available(code, current=previous_bind):
+                    messagebox.showwarning(
+                        "Hotkey in use",
+                        "That hotkey is already assigned. "
+                        "Clear the existing bind before reusing it."
+                    )
+                    apply_button_state(previous_bind)
+                    return
                 data_store["bind"] = code
-                bg_color = "#90ee90" if "JOY" in code else "#ADD8E6"
-                button.config(text=code, bg=bg_color)
+                apply_button_state(code)
             elif code == "CANCEL":
                 data_store["bind"] = None
-                button.config(text="Set Bind", bg="#f0f0f0")
+                apply_button_state(None)
 
             self.app.schedule_preset_save()
 
@@ -3474,7 +3507,8 @@ class ComboTab(tk.Frame):
             "bind": None,
             "is_reset": is_reset,
             "voice_entry": None,
-            "delete_button": None
+            "delete_button": None,
+            "default_bind_text": "RESET" if is_reset else "Set Bind"
         }
         self._config_bind_button(bind_button, row_data)
 
@@ -5076,6 +5110,37 @@ class iRacingControlApp:
                 bg="#f0f0f0"
             )
 
+    def _collect_hotkey_binds(self) -> List[str]:
+        binds: List[str] = []
+        for tab in self.tabs.values():
+            for row in tab.preset_rows:
+                bind = row.get("bind")
+                if bind:
+                    binds.append(bind)
+        if self.combo_tab:
+            for row in self.combo_tab.preset_rows:
+                bind = row.get("bind")
+                if bind:
+                    binds.append(bind)
+        if self.clear_target_bind:
+            binds.append(self.clear_target_bind)
+        if self.manual_rescan_bind:
+            binds.append(self.manual_rescan_bind)
+        return binds
+
+    def is_hotkey_available(
+        self,
+        code: Optional[str],
+        current: Optional[str] = None
+    ) -> bool:
+        """Return True when the hotkey is unused (or only used by current)."""
+        if not code:
+            return True
+        matches = sum(1 for bind in self._collect_hotkey_binds() if bind == code)
+        if current and code == current:
+            return matches <= 1
+        return matches == 0
+
     def _set_clear_target_bind(self):
         """Capture an optional hotkey for clearing target attempts."""
         if self.app_state != "CONFIG":
@@ -5090,6 +5155,14 @@ class iRacingControlApp:
         code = input_manager.capture_any_input()
 
         if code and code != "CANCEL":
+            if not self.is_hotkey_available(code, current=self.clear_target_bind):
+                messagebox.showwarning(
+                    "Hotkey in use",
+                    "That hotkey is already assigned. "
+                    "Clear the existing bind before reusing it."
+                )
+                self._refresh_clear_target_bind_button()
+                return
             self.clear_target_bind = code
         elif code == "CANCEL":
             self.clear_target_bind = None
@@ -5119,6 +5192,14 @@ class iRacingControlApp:
         code = input_manager.capture_any_input()
 
         if code and code != "CANCEL":
+            if not self.is_hotkey_available(code, current=self.manual_rescan_bind):
+                messagebox.showwarning(
+                    "Hotkey in use",
+                    "That hotkey is already assigned. "
+                    "Clear the existing bind before reusing it."
+                )
+                self._refresh_manual_rescan_bind_button()
+                return
             self.manual_rescan_bind = code
         elif code == "CANCEL":
             self.manual_rescan_bind = None

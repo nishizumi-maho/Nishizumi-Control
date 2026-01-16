@@ -5543,21 +5543,7 @@ class iRacingControlApp:
             return
 
         try:
-            with self.ir_lock:
-                if not getattr(self.ir, "is_initialized", False):
-                    self.ir.startup()
-                elif getattr(self.ir, "is_connected", True) is False:
-                    try:
-                        self.ir.shutdown()
-                    except Exception:
-                        pass
-                    self.ir.startup()
-                    self._refresh_controller_ir()
-
-            if not getattr(self.ir, "is_initialized", False):
-                self.root.after(2000, self.auto_preset_loop)
-                return
-            if getattr(self.ir, "is_connected", True) is False:
+            if not self._ensure_sdk_connected():
                 self._set_telemetry_active(False)
                 self.root.after(2000, self.auto_preset_loop)
                 return
@@ -5777,6 +5763,29 @@ class iRacingControlApp:
         self._skip_next_auto_load = False
         return True
 
+    def _ensure_sdk_connected(self) -> bool:
+        """Ensure the IRSDK instance is initialized and connected."""
+        try:
+            startup_called = False
+            with self.ir_lock:
+                if not getattr(self.ir, "is_initialized", False):
+                    self.ir.startup()
+                    startup_called = True
+                elif getattr(self.ir, "is_connected", True) is False:
+                    self.ir.startup()
+                    startup_called = True
+
+            if startup_called:
+                self._refresh_controller_ir()
+
+            if not getattr(self.ir, "is_initialized", False):
+                return False
+            if getattr(self.ir, "is_connected", True) is False:
+                return False
+            return True
+        except Exception:
+            return False
+
     def _mark_session_inactive(self) -> None:
         """Reset session tracking when not connected to a session."""
         self.last_session_type = ""
@@ -5808,15 +5817,31 @@ class iRacingControlApp:
 
     def _handle_weekend_change(self, weekend: Dict[str, Any]) -> None:
         """Reset auto-detect state when a new weekend/session loads."""
-        weekend_key = self._get_weekend_key(weekend)
-        if weekend_key is None or weekend_key == self._last_weekend_key:
+        if not self._detect_session_change(weekend):
             return
 
-        self._last_weekend_key = weekend_key
         self._last_auto_pair = ("", "")
         self.auto_load_attempted.clear()
         if self.auto_scan_on_change.get() or self.auto_restart_on_rescan.get():
             self._schedule_session_scan()
+
+    def _detect_session_change(
+        self, weekend: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """Detect a new weekend/session and refresh controller handles."""
+        if weekend is None:
+            try:
+                weekend = self.ir["WeekendInfo"]
+            except Exception:
+                return False
+
+        weekend_key = self._get_weekend_key(weekend)
+        if weekend_key is None or weekend_key == self._last_weekend_key:
+            return False
+
+        self._last_weekend_key = weekend_key
+        self._refresh_controller_ir()
+        return True
 
     def _telemetry_ready_for_scan(self) -> bool:
         """Return True when telemetry data is stable enough to scan."""
@@ -5977,20 +6002,10 @@ class iRacingControlApp:
     def _scan_driver_controls_worker(self) -> Dict[str, Any]:
         """Worker thread for driver control scanning."""
         try:
-            with self.ir_lock:
-                # Recreate SDK handle to avoid stale sessions between reconnects
-                try:
-                    self.ir.shutdown()
-                except Exception:
-                    pass
-
-                self.ir = irsdk.IRSDK()
-
-                # Always try to connect
-                startup_ok = self.ir.startup()
-
-            if not startup_ok:
+            if not self._ensure_sdk_connected():
                 return {"status": "unavailable"}
+
+            self._detect_session_change()
 
             found_vars = []
 

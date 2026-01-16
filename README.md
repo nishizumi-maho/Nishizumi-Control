@@ -41,6 +41,20 @@ See [`requirements.txt`](requirements.txt) for the full Python dependency list.
 3. Install dependencies: `python -m pip install -r requirements.txt`.
 4. Start the app: `python FINALOK.py`.
 
+## How to Use the App
+1. **Run Dominant Control first.** Start the app (`python FINALOK.py` or the packaged executable) so it is ready to detect telemetry.
+2. **Launch iRacing.** Start iRacing and load into a session or practice so telemetry is active. The HUD overlay should appear once telemetry is detected.
+3. **Pick your input method.**
+   - **Keyboard-only:** Use the default hotkeys to adjust driver controls.
+   - **Wheel/joystick buttons:** Connect your device and map the inputs inside the app (or follow the on-screen prompts if the app detects a new device).
+4. **Adjust driver controls.** Use the mapped keys/buttons to tweak items like brake bias, traction control, ABS, and other car-specific settings. Changes apply in real time and are reflected in the HUD.
+5. **Save presets.** Store per-car or per-track configurations so you can quickly restore preferred setups in future sessions.
+6. **Use macros (optional).** If you set up combos or macros, trigger them to apply multiple adjustments with a single input.
+7. **Enable speech features (optional).** If text-to-speech or voice commands are installed, toggle them in the app settings to get audio feedback or issue hands-free adjustments.
+8. **Exit safely.** Close the app when done or before shutting down iRacing.
+
+> **Tip:** If the HUD does not appear, confirm that iRacing telemetry is enabled and that the game has fully loaded into a session.
+
 ## Optional Features
 - **Joystick input:** Requires `pygame`.
 - **Text-to-speech:** Requires `pyttsx3`.

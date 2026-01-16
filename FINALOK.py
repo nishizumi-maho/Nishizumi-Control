@@ -5926,6 +5926,7 @@ class iRacingControlApp:
         self,
         *,
         silent_if_unavailable: bool = False,
+        allow_restart: bool = True,
         on_complete: Optional[Callable[[], None]] = None
     ):
         """Scan for dc* driver control variables in current car."""
@@ -5935,7 +5936,12 @@ class iRacingControlApp:
                     self.root.after(0, on_complete)
                 return
 
-            if self.auto_restart_on_rescan.get() and self.scans_since_restart >= 1:
+            if (
+                allow_restart
+                and self.auto_restart_on_rescan.get()
+                and self.scans_since_restart >= 1
+                and not self.pending_scan_on_start
+            ):
                 detected_car, detected_track = self._detect_current_car_track()
                 restart_car = (
                     detected_car
@@ -6536,7 +6542,8 @@ class iRacingControlApp:
             self.root.after(
                 50,
                 lambda: self.scan_driver_controls(
-                    silent_if_unavailable=self._pending_scan_silent
+                    silent_if_unavailable=self._pending_scan_silent,
+                    allow_restart=False
                 )
             )
 

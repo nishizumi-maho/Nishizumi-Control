@@ -5736,8 +5736,8 @@ class iRacingControlApp:
 
         # Load combo config
         combo_data = data.get("combo")
-        if self.combo_tab and combo_data:
-            self.combo_tab.set_config(combo_data)
+        if self.combo_tab is not None:
+            self.combo_tab.set_config(combo_data or {})
 
         # Load overlay config
         overlay_config = self.saved_presets[car].get("_overlay", {})

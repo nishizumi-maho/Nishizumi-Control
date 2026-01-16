@@ -268,7 +268,7 @@ DEFAULT_OVERLAY_FEEDBACK = {
 
 # Timing profiles for input simulation (click-click timing)
 GLOBAL_TIMING = {
-    "profile": "bot",  # "aggressive", "casual", "relaxed", "custom", "bot", "bot_safe"
+    "profile": "bot",  # "aggressive", "casual", "relaxed", "custom", "bot" (Swift), "bot_safe" (Steady)
     # Custom profile settings:
     "press_min_ms": 60,
     "press_max_ms": 80,
@@ -588,7 +588,7 @@ def _compute_timing(is_float: bool = False) -> Tuple[float, float]:
             press_ms += random.uniform(-rng, rng)
             interval_ms += random.uniform(-rng, rng)
 
-    # Ensure minimum values, allowing extremely low latency for bot modes
+    # Ensure minimum values, allowing extremely low latency for swift modes
     if profile in {"bot", "bot_safe"}:
         min_value = 1
     else:
@@ -3725,7 +3725,7 @@ class GlobalTimingWindow(tk.Toplevel):
 
         tk.Radiobutton(
             profiles_frame,
-            text="🤖 BOT (experimental, near-zero delay)",
+            text="⚡ Swift (experimental, near-zero delay)",
             variable=self.var_profile,
             value="bot",
             command=self._on_profile_change
@@ -3733,7 +3733,7 @@ class GlobalTimingWindow(tk.Toplevel):
 
         tk.Radiobutton(
             profiles_frame,
-            text="🤖 BOT Stable (fast, more reliable)",
+            text="🌿 Steady (fast, more reliable)",
             variable=self.var_profile,
             value="bot_safe",
             command=self._on_profile_change

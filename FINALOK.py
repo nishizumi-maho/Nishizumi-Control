@@ -4044,9 +4044,9 @@ class iRacingControlApp:
         )
         self.auto_detect = tk.BooleanVar(value=True)
         self.auto_scan_on_change = tk.BooleanVar(value=True)
-        self.auto_restart_on_rescan = tk.BooleanVar(value=True)
-        self.auto_restart_on_race = tk.BooleanVar(value=True)
-        self.auto_restart_on_track_ready = tk.BooleanVar(value=True)
+        self.auto_restart_on_rescan = tk.BooleanVar(value=False)
+        self.auto_restart_on_race = tk.BooleanVar(value=False)
+        self.auto_restart_on_track_ready = tk.BooleanVar(value=False)
         self.block_off_track_commands = tk.BooleanVar(value=True)
         self.keep_trying_targets = tk.BooleanVar(value=True)
         self.show_scan_popup = tk.BooleanVar(value=False)
@@ -6702,10 +6702,10 @@ class iRacingControlApp:
         )
         self.auto_detect.set(data.get("auto_detect", True))
         self.auto_scan_on_change.set(data.get("auto_scan_on_change", True))
-        self.auto_restart_on_rescan.set(data.get("auto_restart_on_rescan", True))
-        self.auto_restart_on_race.set(data.get("auto_restart_on_race", True))
+        self.auto_restart_on_rescan.set(data.get("auto_restart_on_rescan", False))
+        self.auto_restart_on_race.set(data.get("auto_restart_on_race", False))
         self.auto_restart_on_track_ready.set(
-            data.get("auto_restart_on_track_ready", True)
+            data.get("auto_restart_on_track_ready", False)
         )
         block_setting = data.get(
             "block_off_track_commands",

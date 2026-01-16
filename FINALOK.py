@@ -3046,7 +3046,7 @@ class ControlTab(tk.Frame):
             entry.config(state="readonly")
 
     def run_bot_timing_probe(self):
-        """Run a fast timing probe to suggest a stable BOT delay."""
+        """Run a fast timing probe to suggest a stable Rapid delay."""
 
         def _worker():
             try:
@@ -3070,7 +3070,7 @@ class ControlTab(tk.Frame):
             else:
                 msg = (
                     f"Minimal stable pulse detected at ~{suggested} ms.\n"
-                    "Apply this value to BOT/custom timings for reliable updates."
+                    "Apply this value to Rapid/Custom timings for reliable updates."
                 )
                 self.after(0, lambda: messagebox.showinfo("Probe Result", msg))
 
@@ -3860,7 +3860,7 @@ class GlobalTimingWindow(tk.Toplevel):
 
         tk.Radiobutton(
             profiles_frame,
-            text="🤖 BOT (experimental, near-zero delay)",
+            text="⚡ Rapid (experimental, near-zero delay)",
             variable=self.var_profile,
             value="bot",
             command=self._on_profile_change
@@ -3868,7 +3868,7 @@ class GlobalTimingWindow(tk.Toplevel):
 
         tk.Radiobutton(
             profiles_frame,
-            text="🤖 BOT Stable (fast, more reliable)",
+            text="⚡ Rapid Stable (fast, more reliable)",
             variable=self.var_profile,
             value="bot_safe",
             command=self._on_profile_change

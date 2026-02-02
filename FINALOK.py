@@ -3194,6 +3194,15 @@ class ControlTab(tk.Frame):
             ]
         }
 
+    def get_binding_config(self) -> Dict[str, Any]:
+        """Get increase/decrease bindings for per-car storage."""
+        return {
+            "key_increase": self.controller.key_increase,
+            "key_increase_text": self.btn_increase["text"],
+            "key_decrease": self.controller.key_decrease,
+            "key_decrease_text": self.btn_decrease["text"]
+        }
+
     def get_value_config(self) -> Dict[str, Any]:
         """Get preset values/phrases without bindings."""
         return {
@@ -3264,6 +3273,56 @@ class ControlTab(tk.Frame):
                 existing=preset, 
                 is_reset=preset.get("is_reset", False)
             )
+
+    def apply_binding_config(
+        self,
+        config: Dict[str, Any],
+        only_missing: bool = False
+    ) -> None:
+        """Apply increase/decrease bindings, optionally only if missing."""
+        if not config:
+            return
+
+        def _apply_binding(
+            key_name: str,
+            text_name: str,
+            button: tk.Button,
+            default_text: str
+        ) -> None:
+            current_value = getattr(self.controller, key_name)
+            if only_missing and current_value is not None:
+                return
+
+            if key_name not in config:
+                return
+
+            new_value = config.get(key_name)
+            if new_value is None:
+                setattr(self.controller, key_name, None)
+                button.config(text=default_text, bg="#f0f0f0")
+                return
+
+            try:
+                new_value = int(new_value)
+            except (TypeError, ValueError):
+                return
+
+            setattr(self.controller, key_name, new_value)
+            button_text = config.get(text_name, default_text)
+            button.config(text=button_text, bg="#90ee90")
+
+        _apply_binding(
+            "key_increase",
+            "key_increase_text",
+            self.btn_increase,
+            "Set Increase (+)"
+        )
+        _apply_binding(
+            "key_decrease",
+            "key_decrease_text",
+            self.btn_decrease,
+            "Set Decrease (-)"
+        )
 
     def apply_value_config(self, config: Dict[str, Any]) -> None:
         """Apply values/phrases while preserving existing bindings."""
@@ -5362,6 +5421,7 @@ class iRacingControlApp:
             self.saved_presets[car] = {}
 
         self.saved_presets[car][track] = current_data
+        self._collect_car_bindings(car)
 
         # Save overlay config
         if car not in self.car_overlay_config:
@@ -5413,6 +5473,7 @@ class iRacingControlApp:
         )
         self.overlay_tab.load_for_car(car, self.active_vars, overlay_config)
 
+        self._apply_car_bindings(car, only_missing=True)
         self.register_current_listeners()
         print(f"[Preset] Loaded {car} / {track}")
 
@@ -6310,6 +6371,8 @@ class iRacingControlApp:
             self.car_overlay_config[car]
         )
 
+        self._apply_car_bindings(car, only_missing=True)
+
         # Set editing state
         editing = (self.app_state == "CONFIG")
         for tab in self.tabs.values():
@@ -7190,6 +7253,29 @@ class iRacingControlApp:
                 self.combo_tab.set_config(combo_config)
             except Exception:
                 pass
+
+    def _collect_car_bindings(self, car: str) -> None:
+        """Persist increase/decrease bindings per car."""
+        if not car:
+            return
+        if car not in self.saved_presets:
+            self.saved_presets[car] = {}
+        self.saved_presets[car]["_bindings"] = {
+            var_name: tab.get_binding_config()
+            for var_name, tab in self.tabs.items()
+        }
+
+    def _apply_car_bindings(self, car: str, only_missing: bool = False) -> None:
+        """Apply per-car bindings to current tabs."""
+        if not car:
+            return
+        car_data = self.saved_presets.get(car, {})
+        bindings = car_data.get("_bindings", {})
+        for var_name, config in bindings.items():
+            tab = self.tabs.get(var_name)
+            if not tab:
+                continue
+            tab.apply_binding_config(config, only_missing=only_missing)
 
     def restore_defaults(self):
         """Delete the configuration file and restart the app after confirmation."""

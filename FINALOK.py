@@ -5307,7 +5307,7 @@ class iRacingControlApp:
         if car in self.saved_presets:
             tracks = sorted([
                 t for t in self.saved_presets[car].keys()
-                if t not in {"_overlay", "_overlay_feedback"}
+                if t not in {"_overlay", "_overlay_feedback", "_car_bindings"}
             ])
             self.combo_track["values"] = tracks
         else:
@@ -5362,6 +5362,9 @@ class iRacingControlApp:
             self.saved_presets[car] = {}
 
         self.saved_presets[car][track] = current_data
+        self.saved_presets[car]["_car_bindings"] = self._build_car_binding_template(
+            current_data
+        )
 
         # Save overlay config
         if car not in self.car_overlay_config:
@@ -5415,6 +5418,110 @@ class iRacingControlApp:
 
         self.register_current_listeners()
         print(f"[Preset] Loaded {car} / {track}")
+
+    def _build_car_binding_template(
+        self,
+        preset_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Extract bindings-only template from a full preset payload."""
+        tabs_template: Dict[str, Dict[str, Any]] = {}
+        for var_name, tab_cfg in preset_data.get("tabs", {}).items():
+            presets = tab_cfg.get("presets", [])
+            tabs_template[var_name] = {
+                "key_increase": tab_cfg.get("key_increase"),
+                "key_increase_text": tab_cfg.get("key_increase_text", "Set Increase (+)"),
+                "key_decrease": tab_cfg.get("key_decrease"),
+                "key_decrease_text": tab_cfg.get("key_decrease_text", "Set Decrease (-)"),
+                "presets": [
+                    {
+                        "bind": row.get("bind"),
+                        "is_reset": row.get("is_reset", False)
+                    }
+                    for row in presets
+                ]
+            }
+
+        combo_template = {
+            "presets": [
+                {
+                    "bind": row.get("bind"),
+                    "is_reset": row.get("is_reset", False)
+                }
+                for row in preset_data.get("combo", {}).get("presets", [])
+            ]
+        }
+
+        return {
+            "active_vars": preset_data.get("active_vars", []),
+            "tabs": tabs_template,
+            "combo": combo_template
+        }
+
+    def _merge_binding_rows(
+        self,
+        value_rows: List[Dict[str, Any]],
+        binding_rows: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Overlay binding rows onto value rows while preserving values/phrases."""
+        if not binding_rows:
+            return value_rows
+
+        value_reset = [row for row in value_rows if row.get("is_reset")]
+        value_normal = [row for row in value_rows if not row.get("is_reset")]
+        bind_reset = [row for row in binding_rows if row.get("is_reset")]
+        bind_normal = [row for row in binding_rows if not row.get("is_reset")]
+
+        merged_rows: List[Dict[str, Any]] = []
+
+        for idx in range(max(len(value_reset), len(bind_reset))):
+            row = dict(value_reset[idx]) if idx < len(value_reset) else {"is_reset": True}
+            row["bind"] = bind_reset[idx].get("bind") if idx < len(bind_reset) else None
+            row["is_reset"] = True
+            merged_rows.append(row)
+
+        for idx in range(max(len(value_normal), len(bind_normal))):
+            row = dict(value_normal[idx]) if idx < len(value_normal) else {"is_reset": False}
+            row["bind"] = bind_normal[idx].get("bind") if idx < len(bind_normal) else None
+            row["is_reset"] = False
+            merged_rows.append(row)
+
+        return merged_rows
+
+    def _apply_car_binding_template(self, template: Dict[str, Any]) -> bool:
+        """Apply saved per-car bindings to the current tabs/combo without changing values."""
+        if not template:
+            return False
+
+        for var_name, tab in self.tabs.items():
+            value_cfg = tab.get_config()
+            bind_cfg = template.get("tabs", {}).get(var_name)
+            if not bind_cfg:
+                continue
+
+            merged_cfg = {
+                "key_increase": bind_cfg.get("key_increase"),
+                "key_increase_text": bind_cfg.get("key_increase_text", "Set Increase (+)"),
+                "key_decrease": bind_cfg.get("key_decrease"),
+                "key_decrease_text": bind_cfg.get("key_decrease_text", "Set Decrease (-)"),
+                "presets": self._merge_binding_rows(
+                    value_cfg.get("presets", []),
+                    bind_cfg.get("presets", [])
+                )
+            }
+            tab.set_config(merged_cfg)
+
+        if self.combo_tab:
+            combo_values = self.combo_tab.get_config()
+            combo_binds = template.get("combo", {})
+            merged_combo = {
+                "presets": self._merge_binding_rows(
+                    combo_values.get("presets", []),
+                    combo_binds.get("presets", [])
+                )
+            }
+            self.combo_tab.set_config(merged_combo)
+
+        return True
 
     def action_load_preset(self):
         """Load selected preset."""
@@ -6217,9 +6324,16 @@ class iRacingControlApp:
             # Load preset will rebuild tabs with configs and re-register listeners
             self.load_specific_preset(car, track)
         else:
+            bindings_applied = False
+            car_binding_template = self.saved_presets[car].get("_car_bindings", {})
+            if car_binding_template:
+                bindings_applied = self._apply_car_binding_template(
+                    car_binding_template
+                )
+
             # Even without saved presets, ensure any current bindings stay active.
             # If this rescan is for the same car/track, reuse inline config.
-            if (car, track) == previous_pair:
+            if not bindings_applied and (car, track) == previous_pair:
                 self._apply_inline_config(fallback_tabs, fallback_combo)
             self.register_current_listeners()
 

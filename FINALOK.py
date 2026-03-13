@@ -603,38 +603,7 @@ def _compute_timing(is_float: bool = False) -> Tuple[float, float]:
     return press_ms / 1000.0, interval_ms / 1000.0
 
 
-def _resolve_scan_code(binding: Optional[Any]) -> Optional[int]:
-    """Resolve a stored binding into a keyboard scan code when possible."""
-
-    if binding is None:
-        return None
-
-    if isinstance(binding, numbers.Integral):
-        return int(binding)
-
-    if isinstance(binding, str):
-        text = binding.strip()
-        if not text:
-            return None
-
-        if text.isdigit() or (text.startswith("-") and text[1:].isdigit()):
-            return int(text)
-
-        if text.startswith("KEY:"):
-            key_name = text.split(":", 1)[1].strip().lower()
-            if not key_name:
-                return None
-            try:
-                codes = keyboard.key_to_scan_codes(key_name)
-                if codes:
-                    return int(codes[0])
-            except Exception:
-                return None
-
-    return None
-
-
-def click_pulse(scan_code: Optional[Any], is_float: bool = False):
+def click_pulse(scan_code: Optional[int], is_float: bool = False):
     """
     Execute a single key press pulse with timing.
     
@@ -642,10 +611,10 @@ def click_pulse(scan_code: Optional[Any], is_float: bool = False):
         scan_code: The keyboard scan code to pulse
         is_float: Whether this is for a float variable
     """
-    code = _resolve_scan_code(scan_code)
-    if code is None:
+    if not scan_code:
         return
     try:
+        code = int(scan_code)
         t_press, t_interval = _compute_timing(is_float=is_float)
         press_key(code)
         time.sleep(t_press)
@@ -655,7 +624,7 @@ def click_pulse(scan_code: Optional[Any], is_float: bool = False):
         print(f"[click_pulse] Error: {e}")
 
 
-def _direct_pulse(scan_code: Optional[Any], press_ms: int, interval_ms: int):
+def _direct_pulse(scan_code: Optional[int], press_ms: int, interval_ms: int):
     """
     Execute a single key press pulse with explicit timing overrides.
 
@@ -664,11 +633,11 @@ def _direct_pulse(scan_code: Optional[Any], press_ms: int, interval_ms: int):
         press_ms: Duration to hold the key in milliseconds.
         interval_ms: Post-release interval in milliseconds.
     """
-    code = _resolve_scan_code(scan_code)
-    if code is None:
+    if not scan_code:
         return
 
     try:
+        code = int(scan_code)
         press_key(code)
         time.sleep(max(1, press_ms) / 1000.0)
         release_key(code)
@@ -3028,42 +2997,23 @@ class ControlTab(tk.Frame):
 
         btn = self.btn_increase if direction == "increase" else self.btn_decrease
         original_text = btn["text"]
-        btn.config(text="PRESS KEY/BUTTON...", bg="yellow")
+        btn.config(text="PRESS KEY...", bg="yellow")
         self.update_idletasks()
 
-        captured = input_manager.capture_any_input()
+        scan_code, key_name = input_manager.capture_keyboard_scancode()
 
-        if captured == "CANCEL":
+        if key_name == "CANCEL":
             if direction == "increase":
                 self.controller.key_increase = None
             else:
                 self.controller.key_decrease = None
             btn.config(text=original_text, bg="#f0f0f0")
-        elif captured:
-            if captured.startswith("KEY:"):
-                key_name = captured.split(":", 1)[1].strip()
-                try:
-                    scan_codes = keyboard.key_to_scan_codes(key_name.lower())
-                    scan_code = int(scan_codes[0]) if scan_codes else None
-                except Exception:
-                    scan_code = None
-
-                if scan_code is None:
-                    btn.config(text=original_text, bg="#f0f0f0")
-                else:
-                    if direction == "increase":
-                        self.controller.key_increase = scan_code
-                    else:
-                        self.controller.key_decrease = scan_code
-                    btn.config(text=f"OK: {key_name.upper()}", bg="#90ee90")
-            elif captured.startswith("JOY:"):
-                if direction == "increase":
-                    self.controller.key_increase = captured
-                else:
-                    self.controller.key_decrease = captured
-                btn.config(text=captured, bg="#ADD8E6")
+        elif scan_code:
+            if direction == "increase":
+                self.controller.key_increase = scan_code
             else:
-                btn.config(text=original_text, bg="#f0f0f0")
+                self.controller.key_decrease = scan_code
+            btn.config(text=f"OK: {key_name.upper()}", bg="#90ee90")
         else:
             btn.config(text=original_text, bg="#f0f0f0")
 
@@ -3288,31 +3238,12 @@ class ControlTab(tk.Frame):
         # Set keys
         increase_key = config.get("key_increase")
         decrease_key = config.get("key_decrease")
-        if isinstance(increase_key, numbers.Integral):
-            self.controller.key_increase = int(increase_key)
-        elif isinstance(increase_key, str):
-            increase_text = increase_key.strip()
-            if increase_text.startswith("JOY:"):
-                self.controller.key_increase = increase_text
-            elif increase_text.isdigit() or (increase_text.startswith("-") and increase_text[1:].isdigit()):
-                self.controller.key_increase = int(increase_text)
-            else:
-                self.controller.key_increase = None
-        else:
-            self.controller.key_increase = None
-
-        if isinstance(decrease_key, numbers.Integral):
-            self.controller.key_decrease = int(decrease_key)
-        elif isinstance(decrease_key, str):
-            decrease_text = decrease_key.strip()
-            if decrease_text.startswith("JOY:"):
-                self.controller.key_decrease = decrease_text
-            elif decrease_text.isdigit() or (decrease_text.startswith("-") and decrease_text[1:].isdigit()):
-                self.controller.key_decrease = int(decrease_text)
-            else:
-                self.controller.key_decrease = None
-        else:
-            self.controller.key_decrease = None
+        self.controller.key_increase = (
+            int(increase_key) if increase_key is not None else None
+        )
+        self.controller.key_decrease = (
+            int(decrease_key) if decrease_key is not None else None
+        )
 
         self.btn_increase.config(text=config.get("key_increase_text", "Set Increase (+)"))
         self.btn_decrease.config(text=config.get("key_decrease_text", "Set Decrease (-)"))

@@ -967,7 +967,8 @@ class InputManager:
                         events = pygame.event.get()
                         for event in events:
                             if event.type == pygame.JOYBUTTONDOWN:
-                                code = f"JOY:{event.joy}:{event.button}"
+                                joy_id = self._event_joystick_id(event)
+                                code = f"JOY:{joy_id}:{event.button}"
                                 if code in self.listeners:
                                     threading.Thread(
                                         target=self.listeners[code],
@@ -1018,7 +1019,9 @@ class InputManager:
                             try:
                                 for b_idx in range(joy.get_numbuttons()):
                                     if joy.get_button(b_idx):
-                                        captured_code = f"JOY:{joy.get_id()}:{b_idx}"
+                                        captured_code = (
+                                            f"JOY:{self._joystick_identifier(joy)}:{b_idx}"
+                                        )
                                         break
                             except Exception:
                                 pass
@@ -1039,6 +1042,34 @@ class InputManager:
                     pass
 
         return captured_code
+
+    @staticmethod
+    def _joystick_identifier(joy: Any) -> int:
+        """Return a joystick id compatible with pygame button events."""
+
+        try:
+            return int(joy.get_instance_id())
+        except Exception:
+            try:
+                return int(joy.get_id())
+            except Exception:
+                return -1
+
+    @staticmethod
+    def _event_joystick_id(event: Any) -> int:
+        """Extract joystick id from a pygame event with pygame1/pygame2 fallback."""
+
+        if hasattr(event, "instance_id"):
+            try:
+                return int(event.instance_id)
+            except Exception:
+                pass
+        if hasattr(event, "joy"):
+            try:
+                return int(event.joy)
+            except Exception:
+                pass
+        return -1
 
     def capture_keyboard_scancode(self, timeout: float = 10.0) -> Tuple[Optional[int], Optional[str]]:
         """

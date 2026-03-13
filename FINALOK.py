@@ -3057,11 +3057,11 @@ class ControlTab(tk.Frame):
                         self.controller.key_decrease = scan_code
                     btn.config(text=f"OK: {key_name.upper()}", bg="#90ee90")
             elif captured.startswith("JOY:"):
-                if direction == "increase":
-                    self.controller.key_increase = captured
-                else:
-                    self.controller.key_decrease = captured
-                btn.config(text=captured, bg="#ADD8E6")
+                messagebox.showinfo(
+                    "Unsupported Binding",
+                    "Joystick increase/decrease bindings are not supported yet. Please bind a keyboard key."
+                )
+                btn.config(text=original_text, bg="#f0f0f0")
             else:
                 btn.config(text=original_text, bg="#f0f0f0")
         else:
@@ -3292,9 +3292,7 @@ class ControlTab(tk.Frame):
             self.controller.key_increase = int(increase_key)
         elif isinstance(increase_key, str):
             increase_text = increase_key.strip()
-            if increase_text.startswith("JOY:"):
-                self.controller.key_increase = increase_text
-            elif increase_text.isdigit() or (increase_text.startswith("-") and increase_text[1:].isdigit()):
+            if increase_text.isdigit() or (increase_text.startswith("-") and increase_text[1:].isdigit()):
                 self.controller.key_increase = int(increase_text)
             else:
                 self.controller.key_increase = None
@@ -3305,9 +3303,7 @@ class ControlTab(tk.Frame):
             self.controller.key_decrease = int(decrease_key)
         elif isinstance(decrease_key, str):
             decrease_text = decrease_key.strip()
-            if decrease_text.startswith("JOY:"):
-                self.controller.key_decrease = decrease_text
-            elif decrease_text.isdigit() or (decrease_text.startswith("-") and decrease_text[1:].isdigit()):
+            if decrease_text.isdigit() or (decrease_text.startswith("-") and decrease_text[1:].isdigit()):
                 self.controller.key_decrease = int(decrease_text)
             else:
                 self.controller.key_decrease = None

@@ -989,6 +989,11 @@ class InputManager:
         Returns:
             Input code string (KEY:name or JOY:id:button) or None if timeout
         """
+        # Keep the joystick list in sync with the latest Manage Devices
+        # selection so button capture behaves exactly like runtime bindings.
+        if not self.safe_mode and HAS_PYGAME and self.allowed_devices:
+            self.connect_allowed_devices(self.allowed_devices)
+
         captured_code = None
         start = time.time()
 

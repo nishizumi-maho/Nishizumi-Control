@@ -41,6 +41,14 @@ See [`requirements.txt`](requirements.txt) for the full Python dependency list.
 3. Install dependencies: `python -m pip install -r requirements.txt`.
 4. Start the app: `python FINALOK.py`.
 
+### Debug Mode (keep console open after a forced crash)
+Use debug mode when testing crash scenarios so the terminal window stays open and you can read the stack trace.
+
+- CLI flag: `python FINALOK.py --debug`
+- Environment variable: `set DOMINANT_CONTROL_DEBUG=1` then run `python FINALOK.py`
+
+In debug mode, if a fatal exception occurs, the app waits for input before closing the console.
+
 ## How to Use the App
 1. **Run Dominant Control first.** Start the app (`python FINALOK.py` or the packaged executable) so it is ready to detect telemetry.
 2. **Launch iRacing.** Start iRacing and load into a session or practice so telemetry is active. The HUD overlay should appear once telemetry is detected.

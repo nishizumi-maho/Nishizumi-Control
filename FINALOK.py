@@ -35,6 +35,49 @@ import tempfile
 import wave
 from typing import Dict, List, Tuple, Optional, Any, Callable
 
+
+def _is_debug_mode_enabled() -> bool:
+    """Return True when debug mode is enabled via CLI or environment."""
+
+    cli_flags = {"--debug", "-d"}
+    if any(flag in sys.argv[1:] for flag in cli_flags):
+        return True
+
+    env_flag = os.environ.get("DOMINANT_CONTROL_DEBUG", "")
+    return env_flag.strip().lower() in {"1", "true", "yes", "on"}
+
+
+DEBUG_MODE = _is_debug_mode_enabled()
+
+
+def _hold_console_open_for_debug() -> None:
+    """Keep the console open after a fatal crash while debug mode is active."""
+
+    if not DEBUG_MODE:
+        return
+
+    print("\n[DEBUG] App crashed. Console is being kept open for inspection.")
+
+    try:
+        input("[DEBUG] Press Enter to close...")
+        return
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+    if os.name == "nt":
+        try:
+            import msvcrt
+
+            print("[DEBUG] Press any key to close...")
+            msvcrt.getwch()
+            return
+        except Exception:
+            pass
+
+    # Last-resort fallback if no interactive input stream exists.
+    print("[DEBUG] Non-interactive console detected. Waiting 30 seconds...")
+    time.sleep(30)
+
 # ======================================================================
 # WATCHDOG UTILITY
 # ======================================================================
@@ -7332,7 +7375,7 @@ def main():
         print(f"Fatal Error: {e}")
         import traceback
         traceback.print_exc()
-        input("Press Enter to close...")
+        _hold_console_open_for_debug()
 
 
 if __name__ == "__main__":

@@ -2506,6 +2506,19 @@ class GenericController:
             )
             self._worker_thread.start()
 
+    def request_delta(self, delta: float):
+        """Adjust the requested target by a relative amount."""
+        with self._target_lock:
+            base = self._requested_target
+
+        if base is None:
+            current = self.read_telemetry()
+            if current is None:
+                return
+            base = float(current)
+
+        self.request_target(base + delta)
+
     def clear_target(self):
         """Clear any pending target requests and stop adjusting."""
         with self._target_lock:
@@ -2863,7 +2876,7 @@ class ControlTab(tk.Frame):
         header = tk.Frame(presets_frame)
         header.pack(fill="x", padx=2, pady=(0, 2))
         tk.Label(
-            header, text="Type", width=6, anchor="w", font=("Arial", 8, "bold")
+            header, text="Type", width=10, anchor="w", font=("Arial", 8, "bold")
         ).pack(side="left")
         tk.Label(
             header,
@@ -2900,6 +2913,8 @@ class ControlTab(tk.Frame):
 
         # Add initial preset rows
         self.add_preset_row(is_reset=True)
+        self.add_preset_row(row_type="increment")
+        self.add_preset_row(row_type="decrement")
         for _ in range(4):
             self.add_preset_row()
 
@@ -2971,7 +2986,11 @@ class ControlTab(tk.Frame):
 
         for row in self.preset_rows:
             try:
-                row["entry"].config(state=state)
+                row_type = row.get("row_type", "macro")
+                if row_type in {"increment", "decrement"}:
+                    row["entry"].config(state="readonly")
+                else:
+                    row["entry"].config(state=state)
                 if "voice_entry" in row:
                     row["voice_entry"].config(state=state)
                 delete_button = row.get("delete_button")
@@ -3062,28 +3081,45 @@ class ControlTab(tk.Frame):
         button.config(command=on_click)
 
     def add_preset_row(
-        self, 
-        existing: Optional[Dict[str, Any]] = None, 
-        is_reset: bool = False
+        self,
+        existing: Optional[Dict[str, Any]] = None,
+        is_reset: bool = False,
+        row_type: str = "macro"
     ):
         """Add a preset row to the UI."""
         frame = tk.Frame(self.presets_container)
         frame.pack(fill="x", pady=2)
 
-        label_text = "RESET" if is_reset else "Macro"
+        if is_reset:
+            row_type = "reset"
+
+        if row_type == "increment":
+            label_text = "Step +1"
+        elif row_type == "decrement":
+            label_text = "Step -1"
+        elif row_type == "reset":
+            label_text = "RESET"
+        else:
+            label_text = "Macro"
         tk.Label(
             frame,
             text=label_text,
             width=6,
             anchor="w",
-            fg="red" if is_reset else "black"
+            fg="red" if row_type == "reset" else "black"
         ).pack(side="left")
 
         value_entry = ttk.Entry(frame, width=8)
         value_entry.pack(side="left", padx=5)
         self._bind_autosave_entry(value_entry)
 
-        if self.app.app_state != "CONFIG":
+        if row_type == "increment":
+            value_entry.insert(0, "1")
+            value_entry.config(state="readonly")
+        elif row_type == "decrement":
+            value_entry.insert(0, "-1")
+            value_entry.config(state="readonly")
+        elif self.app.app_state != "CONFIG":
             value_entry.config(state="readonly")
 
         bind_button = tk.Button(frame, text="Set Bind", width=12)
@@ -3101,6 +3137,7 @@ class ControlTab(tk.Frame):
             "entry": value_entry,
             "bind": None,
             "is_reset": is_reset,
+            "row_type": row_type,
             "voice_entry": voice_entry,
             "delete_button": None,
             "default_bind_text": "Set Bind"
@@ -3108,10 +3145,21 @@ class ControlTab(tk.Frame):
         self._config_bind_button(bind_button, row_data)
 
         if existing:
+            existing_type = existing.get("row_type")
+            if existing_type:
+                row_type = existing_type
+                row_data["row_type"] = row_type
+
             value_entry.config(state="normal")
             value_entry.delete(0, tk.END)
-            value_entry.insert(0, existing.get("val", ""))
-            if self.app.app_state != "CONFIG":
+            if row_type == "increment":
+                value_entry.insert(0, "1")
+            elif row_type == "decrement":
+                value_entry.insert(0, "-1")
+            else:
+                value_entry.insert(0, existing.get("val", ""))
+
+            if row_type in {"increment", "decrement"} or self.app.app_state != "CONFIG":
                 value_entry.config(state="readonly")
 
             row_data["bind"] = existing.get("bind")
@@ -3128,7 +3176,7 @@ class ControlTab(tk.Frame):
             if self.app.app_state != "CONFIG":
                 voice_entry.config(state="readonly")
 
-        if not is_reset:
+        if row_type == "macro":
             delete_button = tk.Button(
                 frame,
                 text="X",
@@ -3186,6 +3234,7 @@ class ControlTab(tk.Frame):
                     "val": row["entry"].get(),
                     "bind": row["bind"],
                     "is_reset": row.get("is_reset", False),
+                    "row_type": row.get("row_type", "macro"),
                     "voice_phrase": (
                         row.get("voice_entry").get() if row.get("voice_entry") else ""
                     )
@@ -3201,6 +3250,7 @@ class ControlTab(tk.Frame):
                 {
                     "val": row["entry"].get(),
                     "is_reset": row.get("is_reset", False),
+                    "row_type": row.get("row_type", "macro"),
                     "voice_phrase": (
                         row.get("voice_entry").get() if row.get("voice_entry") else ""
                     )
@@ -3218,9 +3268,17 @@ class ControlTab(tk.Frame):
         entry = row["entry"]
         entry.config(state="normal")
         entry.delete(0, tk.END)
-        entry.insert(0, preset.get("val", ""))
-        if self.app.app_state != "CONFIG":
+        row_type = row.get("row_type", preset.get("row_type", "macro"))
+        if row_type == "increment":
+            entry.insert(0, "1")
             entry.config(state="readonly")
+        elif row_type == "decrement":
+            entry.insert(0, "-1")
+            entry.config(state="readonly")
+        else:
+            entry.insert(0, preset.get("val", ""))
+            if self.app.app_state != "CONFIG":
+                entry.config(state="readonly")
 
         voice_entry = row.get("voice_entry")
         if voice_entry:
@@ -3255,14 +3313,21 @@ class ControlTab(tk.Frame):
 
         saved_presets = config.get("presets", [])
         has_reset = any(p.get("is_reset") for p in saved_presets)
+        has_increment = any(p.get("row_type") == "increment" for p in saved_presets)
+        has_decrement = any(p.get("row_type") == "decrement" for p in saved_presets)
 
         if not has_reset:
             self.add_preset_row(is_reset=True)
+        if not has_increment:
+            self.add_preset_row(row_type="increment")
+        if not has_decrement:
+            self.add_preset_row(row_type="decrement")
 
         for preset in saved_presets:
             self.add_preset_row(
-                existing=preset, 
-                is_reset=preset.get("is_reset", False)
+                existing=preset,
+                is_reset=preset.get("is_reset", False),
+                row_type=preset.get("row_type", "macro")
             )
 
     def apply_value_config(self, config: Dict[str, Any]) -> None:
@@ -3274,19 +3339,37 @@ class ControlTab(tk.Frame):
         if not saved_presets:
             return
 
-        reset_rows = [row for row in self.preset_rows if row.get("is_reset")]
-        normal_rows = [row for row in self.preset_rows if not row.get("is_reset")]
+        reset_rows = [row for row in self.preset_rows if row.get("row_type") == "reset"]
+        increment_rows = [row for row in self.preset_rows if row.get("row_type") == "increment"]
+        decrement_rows = [row for row in self.preset_rows if row.get("row_type") == "decrement"]
+        normal_rows = [row for row in self.preset_rows if row.get("row_type", "macro") == "macro"]
         reset_used = False
+        increment_used = False
+        decrement_used = False
         normal_index = 0
 
         for preset in saved_presets:
-            is_reset = preset.get("is_reset", False)
-            if is_reset:
+            row_type = preset.get("row_type", "reset" if preset.get("is_reset") else "macro")
+            if row_type == "reset":
                 if reset_rows and not reset_used:
                     row = reset_rows[0]
                     reset_used = True
                 else:
                     self.add_preset_row(is_reset=True)
+                    row = self.preset_rows[-1]
+            elif row_type == "increment":
+                if increment_rows and not increment_used:
+                    row = increment_rows[0]
+                    increment_used = True
+                else:
+                    self.add_preset_row(row_type="increment")
+                    row = self.preset_rows[-1]
+            elif row_type == "decrement":
+                if decrement_rows and not decrement_used:
+                    row = decrement_rows[0]
+                    decrement_used = True
+                else:
+                    self.add_preset_row(row_type="decrement")
                     row = self.preset_rows[-1]
             else:
                 if normal_index < len(normal_rows):
@@ -6818,6 +6901,40 @@ class iRacingControlApp:
 
         return action
 
+    def _make_delta_action(self, controller: GenericController, delta: float):
+        """Create an action that adjusts a controller by a relative step."""
+        def action():
+            if self.app_state != "RUNNING":
+                return
+            if not self._commands_allowed():
+                return
+            controller.request_delta(delta)
+
+        return action
+
+    def _build_single_preset_action(
+        self,
+        controller: GenericController,
+        preset: Dict[str, Any]
+    ) -> Optional[Callable]:
+        """Create an action for a single-tab preset row."""
+        row_type = preset.get("row_type", "reset" if preset.get("is_reset") else "macro")
+        if row_type == "increment":
+            return self._make_delta_action(controller, 1.0)
+        if row_type == "decrement":
+            return self._make_delta_action(controller, -1.0)
+
+        val_str = preset.get("val")
+        if not val_str:
+            return None
+
+        try:
+            target = float(val_str)
+        except Exception:
+            return None
+
+        return self._make_single_action(controller, target)
+
     def _make_combo_action(self, values: Dict[str, str]):
         """Create an action that adjusts multiple controllers at once."""
 
@@ -6848,21 +6965,13 @@ class iRacingControlApp:
             controller = self.controllers[var_name]
 
             for preset in config.get("presets", []):
-                val_str = preset.get("val")
-                if not val_str:
-                    continue
-
-                try:
-                    target = float(val_str)
-                except Exception:
+                action = self._build_single_preset_action(controller, preset)
+                if not action:
                     continue
 
                 phrase = preset.get("voice_phrase", "").strip().lower()
                 if phrase:
-                    voice_phrases[phrase] = self._make_single_action(
-                        controller,
-                        target
-                    )
+                    voice_phrases[phrase] = action
 
         if self.combo_tab:
             combo_config = self.combo_tab.get_config()
@@ -7071,16 +7180,10 @@ class iRacingControlApp:
 
             for preset in config.get("presets", []):
                 bind = preset.get("bind")
-                val_str = preset.get("val")
-                if not val_str:
+                action = self._build_single_preset_action(controller, preset)
+                if not action:
                     continue
 
-                try:
-                    target = float(val_str)
-                except Exception:
-                    continue
-
-                action = self._make_single_action(controller, target)
                 if bind and allow_input:
                     if bind.startswith("KEY:"):
                         key_name = bind.split(":", 1)[1].lower()

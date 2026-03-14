@@ -2986,11 +2986,7 @@ class ControlTab(tk.Frame):
 
         for row in self.preset_rows:
             try:
-                row_type = row.get("row_type", "macro")
-                if row_type in {"increment", "decrement"}:
-                    row["entry"].config(state="readonly")
-                else:
-                    row["entry"].config(state=state)
+                row["entry"].config(state=state)
                 if "voice_entry" in row:
                     row["voice_entry"].config(state=state)
                 delete_button = row.get("delete_button")
@@ -3094,9 +3090,9 @@ class ControlTab(tk.Frame):
             row_type = "reset"
 
         if row_type == "increment":
-            label_text = "Step +1"
+            label_text = "Step Increase"
         elif row_type == "decrement":
-            label_text = "Step -1"
+            label_text = "Step Decrease"
         elif row_type == "reset":
             label_text = "RESET"
         else:
@@ -3104,7 +3100,7 @@ class ControlTab(tk.Frame):
         tk.Label(
             frame,
             text=label_text,
-            width=6,
+            width=13,
             anchor="w",
             fg="red" if row_type == "reset" else "black"
         ).pack(side="left")
@@ -3113,12 +3109,10 @@ class ControlTab(tk.Frame):
         value_entry.pack(side="left", padx=5)
         self._bind_autosave_entry(value_entry)
 
-        if row_type == "increment":
+        if row_type in {"increment", "decrement"}:
             value_entry.insert(0, "1")
-            value_entry.config(state="readonly")
-        elif row_type == "decrement":
-            value_entry.insert(0, "-1")
-            value_entry.config(state="readonly")
+            if self.app.app_state != "CONFIG":
+                value_entry.config(state="readonly")
         elif self.app.app_state != "CONFIG":
             value_entry.config(state="readonly")
 
@@ -3152,14 +3146,12 @@ class ControlTab(tk.Frame):
 
             value_entry.config(state="normal")
             value_entry.delete(0, tk.END)
-            if row_type == "increment":
-                value_entry.insert(0, "1")
-            elif row_type == "decrement":
-                value_entry.insert(0, "-1")
+            if row_type in {"increment", "decrement"}:
+                value_entry.insert(0, existing.get("val", "1"))
             else:
                 value_entry.insert(0, existing.get("val", ""))
 
-            if row_type in {"increment", "decrement"} or self.app.app_state != "CONFIG":
+            if self.app.app_state != "CONFIG":
                 value_entry.config(state="readonly")
 
             row_data["bind"] = existing.get("bind")
@@ -3269,12 +3261,10 @@ class ControlTab(tk.Frame):
         entry.config(state="normal")
         entry.delete(0, tk.END)
         row_type = row.get("row_type", preset.get("row_type", "macro"))
-        if row_type == "increment":
-            entry.insert(0, "1")
-            entry.config(state="readonly")
-        elif row_type == "decrement":
-            entry.insert(0, "-1")
-            entry.config(state="readonly")
+        if row_type in {"increment", "decrement"}:
+            entry.insert(0, preset.get("val", "1"))
+            if self.app.app_state != "CONFIG":
+                entry.config(state="readonly")
         else:
             entry.insert(0, preset.get("val", ""))
             if self.app.app_state != "CONFIG":
@@ -6912,6 +6902,19 @@ class iRacingControlApp:
 
         return action
 
+    def _parse_step_size(self, preset: Dict[str, Any]) -> Optional[float]:
+        """Parse a positive step magnitude from a preset row."""
+        raw_value = str(preset.get("val", "")).strip()
+        if not raw_value:
+            return 1.0
+
+        try:
+            step = abs(float(raw_value))
+        except Exception:
+            return None
+
+        return step
+
     def _build_single_preset_action(
         self,
         controller: GenericController,
@@ -6920,9 +6923,15 @@ class iRacingControlApp:
         """Create an action for a single-tab preset row."""
         row_type = preset.get("row_type", "reset" if preset.get("is_reset") else "macro")
         if row_type == "increment":
-            return self._make_delta_action(controller, 1.0)
+            step = self._parse_step_size(preset)
+            if step is None:
+                return None
+            return self._make_delta_action(controller, step)
         if row_type == "decrement":
-            return self._make_delta_action(controller, -1.0)
+            step = self._parse_step_size(preset)
+            if step is None:
+                return None
+            return self._make_delta_action(controller, -step)
 
         val_str = preset.get("val")
         if not val_str:

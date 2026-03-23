@@ -3,7 +3,7 @@
 
 **Uninstall vJoy to use this app!**
 
-Download it here: https://github.com/nishizumi-maho/Nishizumi-Control/releases/tag/V6.0.0
+Download it here: https://github.com/nishizumi-maho/Nishizumi-Control/releases
 
 
 An accessibility-focused control manager for iRacing that provides:

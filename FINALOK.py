@@ -5409,15 +5409,35 @@ class iRacingControlApp:
         """Handle car selection."""
         car = self.combo_car.get()
         if car in self.saved_presets:
-            tracks = sorted([
-                t for t in self.saved_presets[car].keys()
-                if t not in {"_overlay", "_overlay_feedback"}
-            ])
-            self.combo_track["values"] = tracks
+            self.combo_track["values"] = self._get_track_preset_names(car)
         else:
             self.combo_track["values"] = []
 
         self.current_car = car
+
+    def _extract_legacy_car_binding_metadata(self, car: str) -> None:
+        """Migrate legacy per-car binding metadata out of the track preset map."""
+        presets = self.saved_presets.get(car)
+        if not isinstance(presets, dict):
+            return
+
+        stored_bindings = presets.pop("_control_bindings", None)
+        if car not in self.car_control_bindings and isinstance(stored_bindings, dict):
+            self.car_control_bindings[car] = stored_bindings
+
+    def _get_track_preset_names(self, car: str) -> List[str]:
+        """Return user-selectable track preset names for a car."""
+        self._extract_legacy_car_binding_metadata(car)
+        presets = self.saved_presets.get(car, {})
+        if not isinstance(presets, dict):
+            return []
+
+        return sorted([
+            track_name for track_name in presets.keys()
+            if isinstance(track_name, str)
+            and track_name not in {"_overlay", "_overlay_feedback"}
+            and not track_name.startswith("_")
+        ])
 
     def auto_fill_ui(self, car: str, track: str):
         """Auto-fill car and track in UI."""
@@ -5442,10 +5462,7 @@ class iRacingControlApp:
         """Capture increase/decrease bindings for the currently loaded tabs."""
         bindings: Dict[str, Dict[str, Any]] = {}
         for var_name, tab in self.tabs.items():
-            binding_config = tab.get_binding_config()
-            if binding_config.get("key_increase") is None and binding_config.get("key_decrease") is None:
-                continue
-            bindings[var_name] = binding_config
+            bindings[var_name] = tab.get_binding_config()
         return bindings
 
     def _apply_car_control_bindings(self, car: str) -> None:
@@ -5492,7 +5509,7 @@ class iRacingControlApp:
         # Save overlay config
         if car not in self.car_overlay_config:
             self.car_overlay_config[car] = {}
-        self.saved_presets[car]["_control_bindings"] = self.car_control_bindings[car]
+        self.saved_presets[car].pop("_control_bindings", None)
         self.saved_presets[car]["_overlay"] = self.car_overlay_config[car]
         self.saved_presets[car]["_overlay_feedback"] = \
             self.car_overlay_feedback.get(car, DEFAULT_OVERLAY_FEEDBACK.copy())
@@ -6323,9 +6340,7 @@ class iRacingControlApp:
             self.saved_presets[car]["_overlay"] = \
                 self.car_overlay_config.get(car, {})
 
-        if "_control_bindings" not in self.saved_presets[car]:
-            self.saved_presets[car]["_control_bindings"] = \
-                self.car_control_bindings.get(car, {})
+        self._extract_legacy_car_binding_metadata(car)
 
         if "_overlay_feedback" not in self.saved_presets[car]:
             self.saved_presets[car]["_overlay_feedback"] = \
@@ -6333,7 +6348,7 @@ class iRacingControlApp:
                     car, DEFAULT_OVERLAY_FEEDBACK.copy()
                 )
 
-        self.car_control_bindings[car] = self.saved_presets[car]["_control_bindings"]
+        self.car_control_bindings[car] = self.car_control_bindings.get(car, {})
         self.car_overlay_config[car] = self.saved_presets[car]["_overlay"]
         self.car_overlay_feedback[car] = self.saved_presets[car][
             "_overlay_feedback"
@@ -6879,12 +6894,12 @@ class iRacingControlApp:
         for car_name, presets in self.saved_presets.items():
             if not isinstance(presets, dict):
                 continue
-            if car_name not in self.car_control_bindings:
-                stored_bindings = presets.get("_control_bindings")
-                if isinstance(stored_bindings, dict):
-                    self.car_control_bindings[car_name] = stored_bindings
-                    continue
+            stored_bindings = presets.pop("_control_bindings", None)
+            if car_name not in self.car_control_bindings and isinstance(stored_bindings, dict):
+                self.car_control_bindings[car_name] = stored_bindings
+                continue
 
+            if car_name not in self.car_control_bindings:
                 inferred_bindings: Dict[str, Dict[str, Any]] = {}
                 for track_name, preset_data in presets.items():
                     if not isinstance(track_name, str) or track_name.startswith("_"):

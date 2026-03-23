@@ -3132,6 +3132,7 @@ class ControlTab(tk.Frame):
             "frame": frame,
             "entry": value_entry,
             "bind": None,
+            "bind_button": bind_button,
             "is_reset": is_reset,
             "row_type": row_type,
             "voice_entry": voice_entry,
@@ -3460,7 +3461,10 @@ class ControlTab(tk.Frame):
                     row = self.preset_rows[-1]
 
             row["bind"] = preset.get("bind")
-            row["bind_button"].config(text=row["bind"] or "Bind")
+            bind_button = row.get("bind_button")
+            if bind_button:
+                default_text = row.get("default_bind_text", "Bind")
+                bind_button.config(text=row["bind"] or default_text)
 
             voice_entry = row.get("voice_entry")
             if voice_entry:
@@ -3678,6 +3682,7 @@ class ComboTab(tk.Frame):
             "frame": frame,
             "entries": {},
             "bind": None,
+            "bind_button": bind_button,
             "is_reset": is_reset,
             "voice_entry": None,
             "delete_button": None,
@@ -3911,7 +3916,10 @@ class ComboTab(tk.Frame):
                     row = self.preset_rows[-1]
 
             row["bind"] = preset.get("bind")
-            row["bind_button"].config(text=row["bind"] or "Bind")
+            bind_button = row.get("bind_button")
+            if bind_button:
+                default_text = row.get("default_bind_text", "Bind")
+                bind_button.config(text=row["bind"] or default_text)
 
             voice_entry = row.get("voice_entry")
             if voice_entry:

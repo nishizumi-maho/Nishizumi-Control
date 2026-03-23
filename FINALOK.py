@@ -4338,6 +4338,8 @@ class iRacingControlApp:
         self.btn_set_dry_bind: Optional[tk.Button] = None
         self.set_wet_bind: Optional[str] = None
         self.btn_set_wet_bind: Optional[tk.Button] = None
+        self._last_condition_debug_snapshot: Optional[Tuple[Any, ...]] = None
+        self._last_auto_loop_debug_snapshot: Optional[Tuple[Any, ...]] = None
         self.voice_phrase_map: Dict[str, Callable] = {}
         self._voice_traces_attached = False
         self._auto_save_job: Optional[str] = None
@@ -5896,6 +5898,94 @@ class iRacingControlApp:
             detail = "toggle"
         self.notify_overlay_status(f"{condition} preset ({detail})", "#66ccff")
 
+    def _debug_condition_sync(
+        self,
+        stage: str,
+        *,
+        force: bool = False,
+        extra: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Print deduplicated condition sync diagnostics to the console."""
+        extra = extra or {}
+        current_car = getattr(self, "current_car", "")
+        current_track = getattr(self, "current_track", "")
+        current_condition = getattr(
+            self,
+            "current_condition",
+            DEFAULT_TRACK_CONDITION
+        )
+        detected_condition = getattr(self, "detected_condition", "")
+        manual_override = getattr(self, "manual_condition_override", None)
+        auto_lock_var = getattr(self, "auto_lock_track_condition", None)
+        auto_lock = auto_lock_var.get() if auto_lock_var is not None else False
+        last_snapshot = getattr(self, "_last_condition_debug_snapshot", None)
+        snapshot = (
+            stage,
+            current_car,
+            current_track,
+            current_condition,
+            detected_condition,
+            manual_override,
+            auto_lock,
+            tuple(sorted(extra.items()))
+        )
+        if not force and snapshot == last_snapshot:
+            return
+
+        self._last_condition_debug_snapshot = snapshot
+        details = [
+            f"car={current_car or '-'}",
+            f"track={current_track or '-'}",
+            f"current={current_condition}",
+            f"detected={detected_condition or '-'}",
+            f"override={manual_override or '-'}",
+            f"auto_lock={auto_lock}"
+        ]
+        details.extend(f"{key}={value}" for key, value in sorted(extra.items()))
+        print(f"[ConditionDebug:{stage}] " + " | ".join(details))
+
+    def _debug_auto_loop(
+        self,
+        *,
+        car: str,
+        track: str,
+        telemetry_reconnected: bool,
+        session_type: str,
+        session_num: Optional[int]
+    ) -> None:
+        """Print a condensed auto-preset loop snapshot when something changes."""
+        current_condition = getattr(
+            self,
+            "current_condition",
+            DEFAULT_TRACK_CONDITION
+        )
+        detected_condition = getattr(self, "detected_condition", "")
+        manual_override = getattr(self, "manual_condition_override", None)
+        last_snapshot = getattr(self, "_last_auto_loop_debug_snapshot", None)
+        snapshot = (
+            car,
+            track,
+            current_condition,
+            detected_condition,
+            manual_override,
+            telemetry_reconnected,
+            session_type,
+            session_num
+        )
+        if snapshot == last_snapshot:
+            return
+
+        self._last_auto_loop_debug_snapshot = snapshot
+        print(
+            "[AutoPresetDebug] "
+            f"session={session_type or '-'}#{session_num} | "
+            f"pair={car} @ {track} | "
+            f"current={current_condition} | "
+            f"detected={detected_condition or '-'} | "
+            f"override={manual_override or '-'} | "
+            f"reconnected={telemetry_reconnected}"
+        )
+
     def _apply_condition_selection(
         self,
         condition: Optional[str],
@@ -5907,11 +5997,22 @@ class iRacingControlApp:
         condition_name = self._normalize_condition_name(condition)
         current_pair = (self.current_car.strip(), self.current_track.strip())
         had_pair = bool(current_pair[0] and current_pair[1])
+        previous_condition = self.current_condition
+        self._debug_condition_sync(
+            "selection-request",
+            force=True,
+            extra={
+                "source": source,
+                "requested": condition_name,
+                "previous": previous_condition,
+                "save_current": save_current,
+                "has_pair": had_pair
+            }
+        )
 
         if save_current and had_pair and condition_name != self.current_condition:
             self._persist_current_condition_before_switch()
 
-        previous_condition = self.current_condition
         self.current_condition = condition_name
         self._sync_condition_selector()
 
@@ -5951,6 +6052,26 @@ class iRacingControlApp:
 
         if previous_condition != condition_name:
             self._notify_condition_change(condition_name, source)
+            self._debug_condition_sync(
+                "selection-applied",
+                force=True,
+                extra={
+                    "source": source,
+                    "previous": previous_condition,
+                    "applied": condition_name,
+                    "changed": True
+                }
+            )
+        else:
+            self._debug_condition_sync(
+                "selection-noop",
+                force=True,
+                extra={
+                    "source": source,
+                    "requested": condition_name,
+                    "changed": False
+                }
+            )
 
         return previous_condition != condition_name
 
@@ -5985,25 +6106,68 @@ class iRacingControlApp:
 
     def _sync_condition_from_telemetry(self) -> None:
         """Update the active condition from telemetry when auto lock is enabled."""
+        declared_wet = self._read_ir_bool("WeatherDeclaredWet")
+        wetness = self._read_ir_value("TrackWetness")
+        precipitation = self._read_ir_value("Precipitation")
         detected = self._read_track_condition_from_iracing()
         if not detected:
+            self._debug_condition_sync(
+                "telemetry-no-data",
+                extra={
+                    "declared_wet": declared_wet,
+                    "track_wetness": wetness,
+                    "precipitation": precipitation
+                }
+            )
             return
 
         detected = self._normalize_condition_name(detected)
         previous_detected = self.detected_condition
         self.detected_condition = detected
+        self._debug_condition_sync(
+            "telemetry-read",
+            extra={
+                "declared_wet": declared_wet,
+                "track_wetness": wetness,
+                "precipitation": precipitation,
+                "previous_detected": previous_detected or "-"
+            }
+        )
 
         if self.manual_condition_override == detected:
             self.manual_condition_override = None
+            self._debug_condition_sync(
+                "override-cleared",
+                force=True,
+                extra={"matched_detected": detected}
+            )
 
         if self.auto_lock_track_condition.get() and not self.manual_condition_override:
             if detected != self.current_condition:
+                self._debug_condition_sync(
+                    "telemetry-switch",
+                    force=True,
+                    extra={
+                        "from_condition": self.current_condition,
+                        "to_condition": detected
+                    }
+                )
                 self._apply_condition_selection(detected, source="auto")
             elif previous_detected != detected:
+                self._debug_condition_sync(
+                    "telemetry-stable",
+                    force=True,
+                    extra={"stable_condition": detected}
+                )
                 self.save_config()
             return
 
         if previous_detected != detected:
+            self._debug_condition_sync(
+                "telemetry-detected-only",
+                force=True,
+                extra={"detected_only": detected}
+            )
             self.save_config()
 
     def update_preset_ui(self):
@@ -6419,6 +6583,13 @@ class iRacingControlApp:
                 return
 
             current_pair = (car_clean, track_clean)
+            self._debug_auto_loop(
+                car=car_clean,
+                track=track_clean,
+                telemetry_reconnected=telemetry_reconnected,
+                session_type=session_type,
+                session_num=session_num
+            )
 
             if current_pair != self._last_auto_pair:
                 self._last_auto_pair = current_pair

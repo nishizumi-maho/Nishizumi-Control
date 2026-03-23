@@ -1769,16 +1769,20 @@ class OverlayWindow(tk.Toplevel):
 
         # Status header
         self.frame_status = tk.Frame(self, bg=self.style_cfg["bg"])
-        self.frame_status.pack(fill="x", pady=2)
+        self.frame_status.pack(fill="x", padx=4, pady=4)
 
         self.lbl_status = tk.Label(
             self.frame_status,
             text="HUD Ready",
             fg="#00FF00",
             bg=self.style_cfg["bg"],
-            font=("Consolas", self.style_cfg["font_size"] + 1, "bold")
+            font=("Consolas", self.style_cfg["font_size"] + 2, "bold"),
+            padx=10,
+            pady=4,
+            anchor="center",
+            justify="center"
         )
-        self.lbl_status.pack(anchor="w", padx=5)
+        self.lbl_status.pack(fill="x")
 
         self.separator = tk.Frame(self, bg="#333", height=1)
         self.separator.pack(fill="x", padx=2)
@@ -1838,7 +1842,12 @@ class OverlayWindow(tk.Toplevel):
         self.geometry(f"{width}x{height}+{self._pos_x}+{self._pos_y}")
 
         self.frame_status.config(bg=bg)
-        self.lbl_status.config(bg=bg, font=("Consolas", fs + 1, "bold"))
+        self.lbl_status.config(
+            bg=bg,
+            font=("Consolas", fs + 2, "bold"),
+            padx=10,
+            pady=4
+        )
         self.frame_monitor.config(bg=bg)
 
         # Update all monitor widgets
@@ -1867,8 +1876,31 @@ class OverlayWindow(tk.Toplevel):
             "white": self.style_cfg["fg"]
         }
         c = color_map.get(color, color)
+        bg = self.style_cfg["bg"]
+        font_size = self.style_cfg["font_size"] + 2
+        padx = 10
+        pady = 4
+        relief = "flat"
+        border = 0
+        if "preset" in text.lower():
+            bg = "#12324f"
+            font_size = self.style_cfg["font_size"] + 6
+            padx = 14
+            pady = 7
+            relief = "solid"
+            border = 1
         try:
-            self.lbl_status.config(text=text, fg=c)
+            self.frame_status.config(bg=bg)
+            self.lbl_status.config(
+                text=text,
+                fg=c,
+                bg=bg,
+                font=("Consolas", font_size, "bold"),
+                padx=padx,
+                pady=pady,
+                relief=relief,
+                bd=border
+            )
         except Exception:
             pass
 

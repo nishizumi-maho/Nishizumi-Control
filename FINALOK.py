@@ -5997,7 +5997,10 @@ class iRacingControlApp:
             self.manual_condition_override = None
 
         if self.auto_lock_track_condition.get() and not self.manual_condition_override:
-            self._apply_condition_selection(detected, source="auto")
+            if detected != self.current_condition:
+                self._apply_condition_selection(detected, source="auto")
+            elif previous_detected != detected:
+                self.save_config()
             return
 
         if previous_detected != detected:

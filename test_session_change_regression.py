@@ -85,5 +85,42 @@ class SessionChangeRegressionTests(unittest.TestCase):
         self.assertEqual(restart_calls, ["pending", "restart"])
 
 
+class TrackConditionSyncRegressionTests(unittest.TestCase):
+    def _make_app(self):
+        app = FINALOK.iRacingControlApp.__new__(FINALOK.iRacingControlApp)
+        app.detected_condition = None
+        app.current_condition = "DRY"
+        app.manual_condition_override = None
+        app.auto_lock_track_condition = _BoolVar(True)
+        app.apply_calls = []
+        app.save_calls = 0
+        app._read_track_condition_from_iracing = lambda: "DRY"
+        app._normalize_condition_name = lambda value: value
+        app._apply_condition_selection = (
+            lambda condition, source="manual": app.apply_calls.append((condition, source))
+        )
+        app.save_config = lambda: setattr(app, "save_calls", app.save_calls + 1)
+        return app
+
+    def test_auto_sync_does_not_reload_when_condition_is_already_active(self):
+        app = self._make_app()
+
+        app._sync_condition_from_telemetry()
+
+        self.assertEqual(app.detected_condition, "DRY")
+        self.assertEqual(app.apply_calls, [])
+        self.assertEqual(app.save_calls, 1)
+
+    def test_auto_sync_applies_when_detected_condition_changes(self):
+        app = self._make_app()
+        app._read_track_condition_from_iracing = lambda: "WET"
+
+        app._sync_condition_from_telemetry()
+
+        self.assertEqual(app.detected_condition, "WET")
+        self.assertEqual(app.apply_calls, [("WET", "auto")])
+        self.assertEqual(app.save_calls, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

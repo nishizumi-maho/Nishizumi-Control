@@ -3251,6 +3251,15 @@ class ControlTab(tk.Frame):
             ]
         }
 
+    def get_binding_config(self) -> Dict[str, Any]:
+        """Get the per-control increase/decrease binding configuration."""
+        return {
+            "key_increase": self.controller.key_increase,
+            "key_increase_text": self.btn_increase["text"],
+            "key_decrease": self.controller.key_decrease,
+            "key_decrease_text": self.btn_decrease["text"]
+        }
+
     def destroy(self):  # type: ignore[override]
         """Ensure monitoring loop stops when widget is destroyed."""
         self.running = False
@@ -3369,6 +3378,27 @@ class ControlTab(tk.Frame):
                     self.add_preset_row()
                     row = self.preset_rows[-1]
             self._apply_row_value(row, preset)
+
+    def apply_binding_config(self, config: Dict[str, Any]) -> None:
+        """Apply per-car increase/decrease bindings without changing presets."""
+        if not config:
+            return
+
+        increase_key = config.get("key_increase")
+        decrease_key = config.get("key_decrease")
+        self.controller.key_increase = (
+            int(increase_key) if increase_key is not None else None
+        )
+        self.controller.key_decrease = (
+            int(decrease_key) if decrease_key is not None else None
+        )
+
+        self.btn_increase.config(
+            text=config.get("key_increase_text", "Set Increase (+)")
+        )
+        self.btn_decrease.config(
+            text=config.get("key_decrease_text", "Set Decrease (-)")
+        )
 
 
 # Due to length, I'll create a third artifact for ComboTab, GlobalTimingWindow, 
@@ -4036,6 +4066,7 @@ class iRacingControlApp:
         # Overlay config per car
         self.car_overlay_config: Dict[str, Dict[str, Dict[str, Any]]] = {}
         self.car_overlay_feedback: Dict[str, Dict[str, float]] = {}
+        self.car_control_bindings: Dict[str, Dict[str, Dict[str, Any]]] = {}
         self.show_overlay_feedback = tk.BooleanVar(value=True)
 
         self._overlay_feedback_state = {
@@ -5407,6 +5438,27 @@ class iRacingControlApp:
             return
         self._save_preset_for_pair(car, track, show_message=True)
 
+    def _collect_current_control_bindings(self) -> Dict[str, Dict[str, Any]]:
+        """Capture increase/decrease bindings for the currently loaded tabs."""
+        bindings: Dict[str, Dict[str, Any]] = {}
+        for var_name, tab in self.tabs.items():
+            binding_config = tab.get_binding_config()
+            if binding_config.get("key_increase") is None and binding_config.get("key_decrease") is None:
+                continue
+            bindings[var_name] = binding_config
+        return bindings
+
+    def _apply_car_control_bindings(self, car: str) -> None:
+        """Apply per-car increase/decrease bindings to the currently loaded tabs."""
+        binding_map = self.car_control_bindings.get(car, {})
+        if not binding_map:
+            return
+
+        for var_name, tab in self.tabs.items():
+            binding_config = binding_map.get(var_name)
+            if binding_config:
+                tab.apply_binding_config(binding_config)
+
     def _save_preset_for_pair(
         self,
         car: str,
@@ -5435,10 +5487,12 @@ class iRacingControlApp:
             self.saved_presets[car] = {}
 
         self.saved_presets[car][track] = current_data
+        self.car_control_bindings[car] = self._collect_current_control_bindings()
 
         # Save overlay config
         if car not in self.car_overlay_config:
             self.car_overlay_config[car] = {}
+        self.saved_presets[car]["_control_bindings"] = self.car_control_bindings[car]
         self.saved_presets[car]["_overlay"] = self.car_overlay_config[car]
         self.saved_presets[car]["_overlay_feedback"] = \
             self.car_overlay_feedback.get(car, DEFAULT_OVERLAY_FEEDBACK.copy())
@@ -5470,6 +5524,7 @@ class iRacingControlApp:
         for var_name, config in tabs_data.items():
             if var_name in self.tabs:
                 self.tabs[var_name].set_config(config)
+        self._apply_car_control_bindings(car)
 
         # Load combo config
         combo_data = data.get("combo")
@@ -6268,12 +6323,17 @@ class iRacingControlApp:
             self.saved_presets[car]["_overlay"] = \
                 self.car_overlay_config.get(car, {})
 
+        if "_control_bindings" not in self.saved_presets[car]:
+            self.saved_presets[car]["_control_bindings"] = \
+                self.car_control_bindings.get(car, {})
+
         if "_overlay_feedback" not in self.saved_presets[car]:
             self.saved_presets[car]["_overlay_feedback"] = \
                 self.car_overlay_feedback.get(
                     car, DEFAULT_OVERLAY_FEEDBACK.copy()
                 )
 
+        self.car_control_bindings[car] = self.saved_presets[car]["_control_bindings"]
         self.car_overlay_config[car] = self.saved_presets[car]["_overlay"]
         self.car_overlay_feedback[car] = self.saved_presets[car][
             "_overlay_feedback"
@@ -6294,6 +6354,8 @@ class iRacingControlApp:
             # If this rescan is for the same car/track, reuse inline config.
             if (car, track) == previous_pair:
                 self._apply_inline_config(fallback_tabs, fallback_combo)
+            else:
+                self._apply_car_control_bindings(car)
             self.register_current_listeners()
 
         self.update_preset_ui()
@@ -6726,6 +6788,7 @@ class iRacingControlApp:
             "rescan_restart_pair": list(self._rescan_restart_pair),
             "allowed_devices": input_manager.allowed_devices,
             "saved_presets": self.saved_presets,
+            "car_control_bindings": self.car_control_bindings,
             "car_overlay_config": self.car_overlay_config,
             "car_overlay_feedback": self.car_overlay_feedback,
             "active_vars": self.active_vars,
@@ -6804,6 +6867,7 @@ class iRacingControlApp:
         input_manager.allowed_devices = data.get("allowed_devices", [])
 
         self.saved_presets = data.get("saved_presets", {})
+        self.car_control_bindings = data.get("car_control_bindings", {})
         self.car_overlay_config = data.get("car_overlay_config", {})
         self.car_overlay_feedback = data.get(
             "car_overlay_feedback", self.car_overlay_feedback
@@ -6811,6 +6875,42 @@ class iRacingControlApp:
         self.active_vars = data.get("active_vars", [])
         self.current_car = data.get("current_car", "")
         self.current_track = data.get("current_track", "")
+
+        for car_name, presets in self.saved_presets.items():
+            if not isinstance(presets, dict):
+                continue
+            if car_name not in self.car_control_bindings:
+                stored_bindings = presets.get("_control_bindings")
+                if isinstance(stored_bindings, dict):
+                    self.car_control_bindings[car_name] = stored_bindings
+                    continue
+
+                inferred_bindings: Dict[str, Dict[str, Any]] = {}
+                for track_name, preset_data in presets.items():
+                    if not isinstance(track_name, str) or track_name.startswith("_"):
+                        continue
+                    if not isinstance(preset_data, dict):
+                        continue
+                    tabs_data = preset_data.get("tabs", {})
+                    if not isinstance(tabs_data, dict):
+                        continue
+                    for var_name, config in tabs_data.items():
+                        if not isinstance(config, dict):
+                            continue
+                        if config.get("key_increase") is None and config.get("key_decrease") is None:
+                            continue
+                        inferred_bindings[var_name] = {
+                            "key_increase": config.get("key_increase"),
+                            "key_increase_text": config.get(
+                                "key_increase_text", "Set Increase (+)"
+                            ),
+                            "key_decrease": config.get("key_decrease"),
+                            "key_decrease_text": config.get(
+                                "key_decrease_text", "Set Decrease (-)"
+                            )
+                        }
+                if inferred_bindings:
+                    self.car_control_bindings[car_name] = inferred_bindings
 
     def _set_voice_tuning_vars(self, tuning: Dict[str, Any]):
         """Populate Tk variables with stored voice tuning values."""

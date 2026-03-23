@@ -11,6 +11,7 @@ An accessibility-focused control manager for iRacing that provides:
 - Multi-device input support (keyboard, joystick, wheel buttons)
 - HUD overlay with real-time telemetry
 - Per-car and per-track preset management
+- Remembers control bindings per car when you switch tracks
 - Macro/combo system for quick adjustments
 
 ![Version](https://img.shields.io/badge/version-6.0.0-blue.svg)

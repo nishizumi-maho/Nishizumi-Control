@@ -3251,6 +3251,28 @@ class ControlTab(tk.Frame):
             ]
         }
 
+    def get_binding_config(self) -> Dict[str, Any]:
+        """Get key and trigger bindings without preset values."""
+        return {
+            "meta_var": self.controller.var_name,
+            "meta_float": self.controller.is_float,
+            "key_increase": self.controller.key_increase,
+            "key_increase_text": self.btn_increase["text"],
+            "key_decrease": self.controller.key_decrease,
+            "key_decrease_text": self.btn_decrease["text"],
+            "presets": [
+                {
+                    "bind": row["bind"],
+                    "is_reset": row.get("is_reset", False),
+                    "row_type": row.get("row_type", "macro"),
+                    "voice_phrase": (
+                        row.get("voice_entry").get() if row.get("voice_entry") else ""
+                    )
+                }
+                for row in self.preset_rows
+            ]
+        }
+
     def destroy(self):  # type: ignore[override]
         """Ensure monitoring loop stops when widget is destroyed."""
         self.running = False
@@ -3369,6 +3391,82 @@ class ControlTab(tk.Frame):
                     self.add_preset_row()
                     row = self.preset_rows[-1]
             self._apply_row_value(row, preset)
+
+    def apply_binding_config(self, config: Dict[str, Any]) -> None:
+        """Apply key and trigger bindings while preserving current values."""
+        if not config:
+            return
+
+        increase_key = config.get("key_increase")
+        decrease_key = config.get("key_decrease")
+        self.controller.key_increase = (
+            int(increase_key) if increase_key is not None else None
+        )
+        self.controller.key_decrease = (
+            int(decrease_key) if decrease_key is not None else None
+        )
+
+        self.btn_increase.config(
+            text=config.get("key_increase_text", "Set Increase (+)")
+        )
+        self.btn_decrease.config(
+            text=config.get("key_decrease_text", "Set Decrease (-)")
+        )
+
+        binding_presets = config.get("presets", [])
+        if not binding_presets:
+            return
+
+        reset_rows = [row for row in self.preset_rows if row.get("row_type") == "reset"]
+        increment_rows = [row for row in self.preset_rows if row.get("row_type") == "increment"]
+        decrement_rows = [row for row in self.preset_rows if row.get("row_type") == "decrement"]
+        normal_rows = [row for row in self.preset_rows if row.get("row_type", "macro") == "macro"]
+        reset_used = False
+        increment_used = False
+        decrement_used = False
+        normal_index = 0
+
+        for preset in binding_presets:
+            row_type = preset.get("row_type", "reset" if preset.get("is_reset") else "macro")
+            if row_type == "reset":
+                if reset_rows and not reset_used:
+                    row = reset_rows[0]
+                    reset_used = True
+                else:
+                    self.add_preset_row(is_reset=True)
+                    row = self.preset_rows[-1]
+            elif row_type == "increment":
+                if increment_rows and not increment_used:
+                    row = increment_rows[0]
+                    increment_used = True
+                else:
+                    self.add_preset_row(row_type="increment")
+                    row = self.preset_rows[-1]
+            elif row_type == "decrement":
+                if decrement_rows and not decrement_used:
+                    row = decrement_rows[0]
+                    decrement_used = True
+                else:
+                    self.add_preset_row(row_type="decrement")
+                    row = self.preset_rows[-1]
+            else:
+                if normal_index < len(normal_rows):
+                    row = normal_rows[normal_index]
+                    normal_index += 1
+                else:
+                    self.add_preset_row()
+                    row = self.preset_rows[-1]
+
+            row["bind"] = preset.get("bind")
+            row["bind_button"].config(text=row["bind"] or "Bind")
+
+            voice_entry = row.get("voice_entry")
+            if voice_entry:
+                voice_entry.config(state="normal")
+                voice_entry.delete(0, tk.END)
+                voice_entry.insert(0, preset.get("voice_phrase", ""))
+                if self.app.app_state != "CONFIG":
+                    voice_entry.config(state="readonly")
 
 
 # Due to length, I'll create a third artifact for ComboTab, GlobalTimingWindow, 
@@ -3683,6 +3781,19 @@ class ComboTab(tk.Frame):
             })
         return {"presets": presets_data}
 
+    def get_binding_config(self) -> Dict[str, Any]:
+        """Get combo trigger bindings without preset values."""
+        presets_data = []
+        for row in self.preset_rows:
+            presets_data.append({
+                "bind": row["bind"],
+                "is_reset": row["is_reset"],
+                "voice_phrase": (
+                    row.get("voice_entry").get() if row.get("voice_entry") else ""
+                )
+            })
+        return {"presets": presets_data}
+
     def set_config(self, config: Dict[str, Any]):
         """Load combo configuration."""
         # Clear existing rows
@@ -3765,6 +3876,48 @@ class ComboTab(tk.Frame):
                     self.add_dynamic_row()
                     row = self.preset_rows[-1]
             self._apply_combo_row_values(row, preset)
+
+    def apply_binding_config(self, config: Dict[str, Any]) -> None:
+        """Apply combo trigger bindings while preserving current values."""
+        if not config:
+            return
+
+        saved_presets = config.get("presets", [])
+        if not saved_presets:
+            return
+
+        reset_rows = [row for row in self.preset_rows if row.get("is_reset")]
+        normal_rows = [row for row in self.preset_rows if not row.get("is_reset")]
+        reset_used = False
+        normal_index = 0
+
+        for preset in saved_presets:
+            is_reset = preset.get("is_reset", False)
+            if is_reset:
+                if reset_rows and not reset_used:
+                    row = reset_rows[0]
+                    reset_used = True
+                else:
+                    self.add_dynamic_row(is_reset=True)
+                    row = self.preset_rows[-1]
+            else:
+                if normal_index < len(normal_rows):
+                    row = normal_rows[normal_index]
+                    normal_index += 1
+                else:
+                    self.add_dynamic_row()
+                    row = self.preset_rows[-1]
+
+            row["bind"] = preset.get("bind")
+            row["bind_button"].config(text=row["bind"] or "Bind")
+
+            voice_entry = row.get("voice_entry")
+            if voice_entry:
+                voice_entry.config(state="normal")
+                voice_entry.delete(0, tk.END)
+                voice_entry.insert(0, preset.get("voice_phrase", ""))
+                if self.app.app_state != "CONFIG":
+                    voice_entry.config(state="readonly")
 
 
 # ======================================================================
@@ -4036,6 +4189,7 @@ class iRacingControlApp:
         # Overlay config per car
         self.car_overlay_config: Dict[str, Dict[str, Dict[str, Any]]] = {}
         self.car_overlay_feedback: Dict[str, Dict[str, float]] = {}
+        self.car_binding_config: Dict[str, Dict[str, Any]] = {}
         self.show_overlay_feedback = tk.BooleanVar(value=True)
 
         self._overlay_feedback_state = {
@@ -5421,6 +5575,8 @@ class iRacingControlApp:
         if car not in self.car_overlay_feedback:
             self.car_overlay_feedback[car] = DEFAULT_OVERLAY_FEEDBACK.copy()
 
+        self._save_bindings_for_car(car)
+
         # Collect tab configs
         current_data = {
             "active_vars": self.active_vars,
@@ -5452,6 +5608,39 @@ class iRacingControlApp:
         self.update_preset_ui()
         if show_message:
             messagebox.showinfo("Saved", f"Preset saved for {car} @ {track}")
+
+    def _save_bindings_for_car(self, car: str) -> None:
+        """Persist the current control bindings as the car default."""
+        self.car_binding_config[car] = {
+            "tabs": {
+                var_name: tab.get_binding_config()
+                for var_name, tab in self.tabs.items()
+            },
+            "combo": (
+                self.combo_tab.get_binding_config() if self.combo_tab else {}
+            )
+        }
+
+    def _apply_saved_bindings_for_car(self, car: str) -> bool:
+        """Apply the stored car-wide bindings to the current controls."""
+        car_bindings = self.car_binding_config.get(car)
+        if not car_bindings:
+            return False
+
+        applied = False
+        for var_name, config in car_bindings.get("tabs", {}).items():
+            tab = self.tabs.get(var_name)
+            if not tab:
+                continue
+            tab.apply_binding_config(config)
+            applied = True
+
+        combo_config = car_bindings.get("combo")
+        if self.combo_tab and combo_config:
+            self.combo_tab.apply_binding_config(combo_config)
+            applied = True
+
+        return applied
 
     def load_specific_preset(self, car: str, track: str):
         """Load a specific car/track preset."""
@@ -5485,6 +5674,7 @@ class iRacingControlApp:
             )
         )
         self.overlay_tab.load_for_car(car, self.active_vars, overlay_config)
+        self._save_bindings_for_car(car)
 
         self.register_current_listeners()
         print(f"[Preset] Loaded {car} / {track}")
@@ -6294,6 +6484,9 @@ class iRacingControlApp:
             # If this rescan is for the same car/track, reuse inline config.
             if (car, track) == previous_pair:
                 self._apply_inline_config(fallback_tabs, fallback_combo)
+                self._save_bindings_for_car(car)
+            else:
+                self._apply_saved_bindings_for_car(car)
             self.register_current_listeners()
 
         self.update_preset_ui()
@@ -6691,6 +6884,8 @@ class iRacingControlApp:
         car = self.current_car or "Generic Car"
         if self.overlay_tab:
             self.overlay_tab.collect_for_car(car)
+        if self.tabs or self.combo_tab:
+            self._save_bindings_for_car(car)
 
         data = {
             "global_timing": GLOBAL_TIMING,
@@ -6728,6 +6923,7 @@ class iRacingControlApp:
             "saved_presets": self.saved_presets,
             "car_overlay_config": self.car_overlay_config,
             "car_overlay_feedback": self.car_overlay_feedback,
+            "car_binding_config": self.car_binding_config,
             "active_vars": self.active_vars,
             "current_car": self.current_car,
             "current_track": self.current_track
@@ -6808,6 +7004,7 @@ class iRacingControlApp:
         self.car_overlay_feedback = data.get(
             "car_overlay_feedback", self.car_overlay_feedback
         )
+        self.car_binding_config = data.get("car_binding_config", {})
         self.active_vars = data.get("active_vars", [])
         self.current_car = data.get("current_car", "")
         self.current_track = data.get("current_track", "")

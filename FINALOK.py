@@ -6378,7 +6378,10 @@ class iRacingControlApp:
 
             driver_info = self.ir["DriverInfo"]
             if not driver_info:
-                self._set_telemetry_active(False)
+                # iRacing can briefly expose an initialized SDK connection before
+                # all session blocks are populated. Treat that as a loading state,
+                # not as a full disconnect, so we do not keep resetting auto-load
+                # bookkeeping and reloading the same preset every poll.
                 self.root.after(2000, self.auto_preset_loop)
                 return
 
@@ -6387,7 +6390,9 @@ class iRacingControlApp:
 
             weekend = self.ir["WeekendInfo"]
             if not weekend:
-                self._set_telemetry_active(False)
+                # Keep the current telemetry session marked active while iRacing is
+                # still filling weekend metadata. Resetting here causes the app to
+                # rediscover the same car/track and reload its preset in a loop.
                 self.root.after(2000, self.auto_preset_loop)
                 return
             self._handle_weekend_change(weekend)
@@ -6495,7 +6500,9 @@ class iRacingControlApp:
         new_num = session_num
 
         if not new_type and new_num is None:
-            self._mark_session_inactive()
+            # SessionInfo may disappear briefly while a session is still loading.
+            # Do not treat that transient gap as a disconnect; auto_preset_loop
+            # already handles true SDK disconnects via _ensure_sdk_connected().
             return False
 
         session_changed = (

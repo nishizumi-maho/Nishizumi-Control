@@ -6500,9 +6500,12 @@ class iRacingControlApp:
         new_num = session_num
 
         if not new_type and new_num is None:
+            self._clear_session_identity()
             # SessionInfo may disappear briefly while a session is still loading.
-            # Do not treat that transient gap as a disconnect; auto_preset_loop
-            # already handles true SDK disconnects via _ensure_sdk_connected().
+            # Clear only the cached session identity so a same-index session can
+            # still be detected when telemetry resumes. Do not treat the gap as
+            # a full disconnect; auto_preset_loop already handles true SDK
+            # disconnects via _ensure_sdk_connected().
             return False
 
         session_changed = (
@@ -6604,8 +6607,7 @@ class iRacingControlApp:
 
     def _mark_session_inactive(self) -> None:
         """Reset session tracking when not connected to a session."""
-        self.last_session_type = ""
-        self.last_session_num = None
+        self._clear_session_identity()
         self._last_auto_pair = ("", "")
         self._session_scan_pending = False
         self.auto_load_attempted.clear()
@@ -6613,6 +6615,11 @@ class iRacingControlApp:
         self._last_weekend_key = None
         self._skip_next_auto_load = False
         self._on_track_restart_seen = False
+
+    def _clear_session_identity(self) -> None:
+        """Forget the last seen session without resetting telemetry state."""
+        self.last_session_type = ""
+        self.last_session_num = None
 
     def _get_weekend_key(self, weekend: Dict[str, Any]) -> Optional[Tuple[Any, ...]]:
         """Return a stable identifier for the current weekend/session."""

@@ -23,7 +23,7 @@ This guide walks through installing Dominant Control, enabling every option, and
    ```
 3. Start the app:
    ```bash
-   python FINALOK.py
+   python dominant_control.py
    ```
 
 ## 3. First Launch Checklist

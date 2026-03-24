@@ -20,7 +20,7 @@ Use the sections below as a checklist. Each step has breathing room so you can s
 
 ### From Source
 1. `python -m pip install -r requirements.txt`
-2. `python FINALOK.py`
+2. `python dominant_control.py`
 
 ## 2) Connect to iRacing
 1. Start iRacing and enter a **private practice session**.

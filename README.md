@@ -14,12 +14,12 @@ An accessibility-focused control manager for iRacing that provides:
 - Remembers control bindings per car when you switch tracks
 - Macro/combo system for quick adjustments
 
-![Version](https://img.shields.io/badge/version-6.0.0-blue.svg)
+![Version](https://img.shields.io/github/v/release/nishizumi-maho/Nishizumi-Control?label=version)
 ![Platform](https://img.shields.io/badge/platform-Windows-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 ## Overview
-Dominant Control is a single-file application (`FINALOK.py`) that manages iRacing’s driver-adjustable controls. It includes optional text-to-speech feedback, joystick support, and offline voice control when the related dependencies are installed.
+Dominant Control is a single-file application (`dominant_control.py`) that manages iRacing’s driver-adjustable controls. It includes optional text-to-speech feedback, joystick support, and offline voice control when the related dependencies are installed.
 
 ## Supported Platforms & Requirements
 - **OS:** Windows 10/11 (64-bit)
@@ -30,7 +30,7 @@ Dominant Control is a single-file application (`FINALOK.py`) that manages iRacin
 See [`requirements.txt`](requirements.txt) for the full Python dependency list.
 
 ## Project Layout
-- `FINALOK.py` — primary application entry point (single-file app).
+- `dominant_control.py` — primary application entry point (single-file app).
 - `archive/` — legacy utilities and archived source (including `archive/dominant_control/`).
 - `docs/` — supplemental documentation.
 
@@ -40,10 +40,10 @@ See [`requirements.txt`](requirements.txt) for the full Python dependency list.
 1. Install Python 3.10+ and Visual C++ Build Tools (for PyAudio) if missing.
 2. Clone or download this repository.
 3. Install dependencies: `python -m pip install -r requirements.txt`.
-4. Start the app: `python FINALOK.py`.
+4. Start the app: `python dominant_control.py`.
 
 ## How to Use the App
-1. **Run Dominant Control first.** Start the app (`python FINALOK.py` or the packaged executable) so it is ready to detect telemetry.
+1. **Run Dominant Control first.** Start the app (`python dominant_control.py` or the packaged executable) so it is ready to detect telemetry.
 2. **Launch iRacing.** Start iRacing and load into a session or practice so telemetry is active. The HUD overlay should appear once telemetry is detected.
 3. **Pick your input method.**
    - **Keyboard-only:** Use the default hotkeys to adjust driver controls.

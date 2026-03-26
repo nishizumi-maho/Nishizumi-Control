@@ -30,6 +30,7 @@ import subprocess
 import importlib
 import queue
 import numbers
+import contextlib
 from array import array
 import tempfile
 import wave
@@ -2441,14 +2442,19 @@ class GenericController:
         Returns:
             Current value or None if unavailable
         """
+        lock = getattr(self.app, "ir_lock", None)
+        cm = lock if lock is not None else contextlib.nullcontext()
         try:
-            if not getattr(self.ir, "is_initialized", False):
-                try:
-                    self.ir.startup()
-                except Exception:
+            with cm:
+                if not getattr(self.ir, "is_initialized", False):
+                    try:
+                        self.ir.startup()
+                    except Exception:
+                        return None
+                if getattr(self.ir, "is_connected", True) is False:
                     return None
-                    
-            value = self.ir[self.var_name]
+
+                value = self.ir[self.var_name]
             if value is None:
                 return None
                 
@@ -6840,16 +6846,17 @@ class iRacingControlApp:
 
             # Try to add all dc* variables from SDK
             try:
-                if hasattr(self.ir, "var_headers_dict") and self.ir.var_headers_dict:
-                    for key in self.ir.var_headers_dict.keys():
-                        if key.startswith("dc"):
-                            candidates.append(key)
-                elif hasattr(self.ir, "var_headers_names"):
-                    names = getattr(self.ir, "var_headers_names", None)
-                    if names:
-                        for key in names:
+                with self.ir_lock:
+                    if hasattr(self.ir, "var_headers_dict") and self.ir.var_headers_dict:
+                        for key in self.ir.var_headers_dict.keys():
                             if key.startswith("dc"):
                                 candidates.append(key)
+                    elif hasattr(self.ir, "var_headers_names"):
+                        names = getattr(self.ir, "var_headers_names", None)
+                        if names:
+                            for key in names:
+                                if key.startswith("dc"):
+                                    candidates.append(key)
             except Exception:
                 pass
 
@@ -6863,7 +6870,8 @@ class iRacingControlApp:
             try:
                 for candidate in candidates:
                     try:
-                        value = self.ir[candidate]
+                        with self.ir_lock:
+                            value = self.ir[candidate]
                     except Exception:
                         continue
 

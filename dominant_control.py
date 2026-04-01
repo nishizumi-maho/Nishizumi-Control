@@ -11,7 +11,7 @@ A comprehensive control management application for iRacing that provides:
 
 Author: Nishizumi Maho
 All Rights Reserved
-Version: 9.0.0
+Version: 7.0.0
 """
 
 import tkinter as tk
@@ -30,10 +30,6 @@ import subprocess
 import importlib
 import queue
 import numbers
-import re
-import urllib.error
-import urllib.request
-import webbrowser
 from array import array
 import tempfile
 import wave
@@ -201,7 +197,7 @@ except Exception as exc:  # noqa: BLE001
 # GLOBAL CONFIGURATION
 # ======================================================================
 APP_NAME = "DominantControl"
-APP_VERSION = "9.0.0"
+APP_VERSION = "6.0.0"
 APP_FOLDER = "DominantControl"
 BASE_PATH = os.getenv("APPDATA") or os.path.expanduser("~")
 CONFIG_FOLDER = os.path.join(BASE_PATH, APP_FOLDER, "configs")
@@ -218,18 +214,6 @@ STARTUP_FOLDER = os.path.join(
     "Startup",
 )
 STARTUP_ENTRY_NAME = f"{APP_NAME}.bat"
-GITHUB_RELEASE_OWNER = "nishizumi-maho"
-GITHUB_RELEASE_REPO = "Nishizumi-Control"
-GITHUB_RELEASES_API_LATEST = (
-    f"https://api.github.com/repos/{GITHUB_RELEASE_OWNER}/"
-    f"{GITHUB_RELEASE_REPO}/releases/latest"
-)
-GITHUB_RELEASES_PAGE_LATEST = (
-    f"https://github.com/{GITHUB_RELEASE_OWNER}/"
-    f"{GITHUB_RELEASE_REPO}/releases/latest"
-)
-GITHUB_API_VERSION = "2022-11-28"
-GITHUB_UPDATE_CHECK_INTERVAL_SECONDS = 6 * 60 * 60
 
 
 def resolve_resource_path(filename: str) -> Optional[str]:
@@ -269,14 +253,6 @@ def apply_app_icon(root: tk.Tk) -> None:
             return
         except Exception as exc:  # noqa: PERF203
             print(f"[ICON] Failed to load {icon_path}: {exc}")
-
-
-def _parse_version_tuple(version: str) -> Tuple[int, ...]:
-    """Convert a version string to a comparable tuple of integers."""
-
-    cleaned = version.strip().lstrip("vV")
-    digits = re.findall(r"\d+", cleaned)
-    return tuple(int(part) for part in digits) if digits else (0,)
 
 
 # Overlay feedback defaults (per-car thresholds)
@@ -4324,8 +4300,6 @@ class iRacingControlApp:
             "presets, or disable “Lock car/track selection” in the Options tab.\n\n"
             "Use CONFIG mode when changing bindings and RUNNING mode when driving."
         )
-        self._latest_release_version: Optional[str] = None
-        self._update_check_running = False
 
         # Load configuration
         self.load_config()
@@ -4354,7 +4328,6 @@ class iRacingControlApp:
 
         # Honor any pending scan requests (set before a restart)
         self.root.after(200, self._perform_pending_scan)
-        self.root.after(3000, self.schedule_update_check)
 
     def _apply_startup_preference(self, notify: bool = False) -> None:
         """Create or remove the startup entry based on current preference."""
@@ -4455,122 +4428,6 @@ class iRacingControlApp:
 
         self.root.after(30, self._drain_ui_queue)
 
-    def schedule_update_check(self) -> None:
-        """Kick off a background update check and schedule the next one."""
-
-        self._check_for_updates_async(notify_when_current=False)
-        delay_ms = int(GITHUB_UPDATE_CHECK_INTERVAL_SECONDS * 1000)
-        self.root.after(delay_ms, self.schedule_update_check)
-
-    def check_for_updates_now(self) -> None:
-        """User-triggered update check."""
-
-        self._check_for_updates_async(notify_when_current=True)
-
-    def _check_for_updates_async(self, notify_when_current: bool) -> None:
-        """Run GitHub latest-release check in a worker thread."""
-
-        if self._update_check_running:
-            if notify_when_current:
-                messagebox.showinfo(
-                    "Update Check",
-                    "An update check is already running. Please wait."
-                )
-            return
-
-        self._update_check_running = True
-
-        def _worker():
-            result = self._fetch_latest_release_version()
-            self.ui(self._handle_update_result, result, notify_when_current)
-
-        threading.Thread(
-            target=_worker,
-            name="github-release-check",
-            daemon=True
-        ).start()
-
-    def _fetch_latest_release_version(self) -> Dict[str, Any]:
-        """Fetch and parse latest release metadata from GitHub."""
-
-        request = urllib.request.Request(
-            GITHUB_RELEASES_API_LATEST,
-            headers={
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": GITHUB_API_VERSION,
-                "User-Agent": f"{APP_NAME}/{APP_VERSION}",
-            },
-            method="GET"
-        )
-
-        try:
-            with urllib.request.urlopen(request, timeout=8) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            return {"ok": False, "error": f"GitHub HTTP error: {exc.code}"}
-        except urllib.error.URLError as exc:
-            return {"ok": False, "error": f"Network error: {exc.reason}"}
-        except Exception as exc:  # noqa: BLE001
-            return {"ok": False, "error": str(exc)}
-
-        version = str(payload.get("tag_name", "")).strip()
-        html_url = str(payload.get("html_url", "")).strip() or GITHUB_RELEASES_PAGE_LATEST
-        published = str(payload.get("published_at", "")).strip()
-
-        if not version:
-            return {"ok": False, "error": "No release tag_name found in GitHub response."}
-
-        return {
-            "ok": True,
-            "version": version,
-            "html_url": html_url,
-            "published_at": published,
-        }
-
-    def _handle_update_result(self, result: Dict[str, Any], notify_when_current: bool) -> None:
-        """Update UI state after the worker completes."""
-
-        self._update_check_running = False
-        if not result.get("ok"):
-            if notify_when_current:
-                messagebox.showwarning(
-                    "Update Check Failed",
-                    f"Could not check for updates.\n\n{result.get('error', 'Unknown error')}"
-                )
-            return
-
-        latest_version = str(result.get("version", "")).strip()
-        self._latest_release_version = latest_version
-
-        current_tuple = _parse_version_tuple(APP_VERSION)
-        latest_tuple = _parse_version_tuple(latest_version)
-        has_update = latest_tuple > current_tuple
-
-        if has_update:
-            published = result.get("published_at") or "unknown date"
-            answer = messagebox.askyesno(
-                "Update Available",
-                (
-                    f"Current version: {APP_VERSION}\n"
-                    f"Latest version: {latest_version}\n"
-                    f"Published: {published}\n\n"
-                    "Open the latest release page now?"
-                )
-            )
-            if answer:
-                webbrowser.open(result.get("html_url", GITHUB_RELEASES_PAGE_LATEST))
-            return
-
-        if notify_when_current:
-            messagebox.showinfo(
-                "No Updates Found",
-                (
-                    f"You are on the latest version.\n\n"
-                    f"Current version: {APP_VERSION}\n"
-                    f"Latest release: {latest_version}"
-                )
-            )
-
     def _create_menu(self):
         """Create application menu bar."""
         menubar = tk.Menu(self.root)
@@ -4595,15 +4452,6 @@ class iRacingControlApp:
         options_menu.add_command(
             label="Restart Application",
             command=restart_program
-        )
-        options_menu.add_separator()
-        options_menu.add_command(
-            label="Check for Updates",
-            command=self.check_for_updates_now
-        )
-        options_menu.add_command(
-            label="Open Latest Release Page",
-            command=lambda: webbrowser.open(GITHUB_RELEASES_PAGE_LATEST)
         )
 
         options_menu.add_separator()

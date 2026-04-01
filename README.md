@@ -5,6 +5,7 @@
 
 Download it here: https://github.com/nishizumi-maho/Nishizumi-Control/releases
 
+Current stable version: **9.0.0**
 
 An accessibility-focused control manager for iRacing that provides:
 - Dynamic driver control adjustment (brake bias, traction control, etc.)
@@ -13,6 +14,7 @@ An accessibility-focused control manager for iRacing that provides:
 - Per-car and per-track preset management
 - Remembers control bindings per car when you switch tracks
 - Macro/combo system for quick adjustments
+- Automatic GitHub release checks (every 6 hours) with in-app update prompts
 
 ![Version](https://img.shields.io/github/v/release/nishizumi-maho/Nishizumi-Control?label=version)
 ![Platform](https://img.shields.io/badge/platform-Windows-blue.svg)

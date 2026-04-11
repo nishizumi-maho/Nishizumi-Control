@@ -5,8 +5,6 @@
 
 Download it here: https://github.com/nishizumi-maho/Nishizumi-Control/releases
 
-Current stable version: **9.0.0**
-
 An accessibility-focused control manager for iRacing that provides:
 - Dynamic driver control adjustment (brake bias, traction control, etc.)
 - Multi-device input support (keyboard, joystick, wheel buttons)

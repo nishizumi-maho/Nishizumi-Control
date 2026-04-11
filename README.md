@@ -43,7 +43,7 @@ See [`requirements.txt`](requirements.txt) for the full Python dependency list.
 4. Start the app: `python dominant_control.py`.
 
 ## How to Use the App
-1. **Run Dominant Control first.** Start the app (`python dominant_control.py` or the packaged executable) so it is ready to detect telemetry.
+1. **Run Dominant Control.** Start the app (`python dominant_control.py` or the packaged executable) so it is ready to detect telemetry.
 2. **Launch iRacing.** Start iRacing and load into a session or practice so telemetry is active. The HUD overlay should appear once telemetry is detected.
 3. **Pick your input method.**
    - **Keyboard-only:** Use the default hotkeys to adjust driver controls.

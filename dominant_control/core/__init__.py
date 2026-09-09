@@ -1,6 +1,7 @@
 """Shared services exposed to independently maintained feature modules."""
 
 from .events import EventBus
+from . import pitstop_rules
 from .ghost_keys import (
     GHOST_MODES,
     GHOST_MODE_HOLD,
@@ -58,6 +59,7 @@ from .telemetry import TelemetryHub, TelemetryProxy, TelemetryStatus
 CORE_API_VERSION = "1.0"
 
 __all__ = [
+    "pitstop_rules",
     "CONTROLS_CFG_INPUT_TYPE_AXIS",
     "CONTROLS_CFG_INPUT_TYPE_JOYSTICK",
     "CONTROLS_CFG_INPUT_TYPE_KEYBOARD",

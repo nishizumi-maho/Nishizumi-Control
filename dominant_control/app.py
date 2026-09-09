@@ -14,10 +14,11 @@ from .app_mixins.lifecycle import LifecycleMixin
 from .app_mixins.bindings import BindingsMixin
 from .app_mixins.ghost_keys import GhostKeysMixin
 from .app_mixins.presets import PresetsMixin
+from .app_mixins.pitstop_rules import PitstopRulesMixin
 from .app_mixins.telemetry import TelemetryMixin
 from .app_mixins.updates import UpdatesMixin
 
-class iRacingControlApp(UiMixin, AutomationMixin, LifecycleMixin, BindingsMixin, GhostKeysMixin, PresetsMixin, TelemetryMixin, UpdatesMixin):
+class iRacingControlApp(UiMixin, AutomationMixin, LifecycleMixin, BindingsMixin, GhostKeysMixin, PresetsMixin, PitstopRulesMixin, TelemetryMixin, UpdatesMixin):
 
     def __init__(self, root: tk.Tk, telemetry_hub: TelemetryHub | None=None):
         self.root = root
@@ -322,6 +323,7 @@ class iRacingControlApp(UiMixin, AutomationMixin, LifecycleMixin, BindingsMixin,
         self.root.after(240, self._turbo_pit_loop)
         self.root.after(320, self._surface_dc_profile_loop)
         self.root.after(1400, self._iracing_controls_auto_sync_loop)
+        self.root.after(2600, self._pitstop_rules_loop)
         if UPDATE_CHECK_AVAILABLE:
             self.root.after(4000, self.schedule_update_check)
         if self.overlay_visible:

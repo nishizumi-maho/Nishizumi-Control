@@ -1,0 +1,179 @@
+name: Dominant Control v13 - Build and Release
+
+# Publishing v13 pushes the tag v13.0.0 on the commit that carries the code.
+# A tag push runs the workflow that exists in the tag's own tree, so this works
+# from any branch; there is no `paths` filter on purpose, because that filter is
+# evaluated against the files a push changes and a tag push changes none, which
+# would silently skip the release.
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v13.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  statuses: write
+
+concurrency:
+  group: dominant-control-v13-release
+  cancel-in-progress: false
+
+jobs:
+  build-release:
+    name: Build the v13 setup
+    runs-on: windows-2022
+    timeout-minutes: 150
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Report the build as running
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api `
+            --method POST `
+            "repos/$env:GITHUB_REPOSITORY/statuses/$env:GITHUB_SHA" `
+            -f state="pending" `
+            -f context="Dominant Control v13 Release" `
+            -f description="Building and validating v13" `
+            -f target_url="https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+
+      - name: Copy the tree to a short path
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $BuildRoot = "C:\dc13"
+          if (Test-Path -LiteralPath $BuildRoot) {
+            Remove-Item -LiteralPath $BuildRoot -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $BuildRoot -Force | Out-Null
+          Copy-Item -Path "$env:GITHUB_WORKSPACE\*" -Destination $BuildRoot -Recurse -Force
+          New-Item -ItemType Directory -Path (
+            Join-Path $env:GITHUB_WORKSPACE "release-output"
+          ) -Force | Out-Null
+
+      - name: Build and test the installer
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          # The build runs the test suite before packaging anything.
+          & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass `
+            -File "C:\dc13\tools\build_installer.ps1"
+          if ($LASTEXITCODE -ne 0) {
+            throw "The installer build failed with code $LASTEXITCODE."
+          }
+
+      - name: Collect the release files
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $Out = Join-Path $env:GITHUB_WORKSPACE "release-output"
+          $Files = @(
+            "C:\dc13\dist\installer\DominantControl_v13_Setup.exe",
+            "C:\dc13\dist\installer\DominantControl_v13_Setup.exe.sha256",
+            "C:\dc13\dist\DominantControl_Portable_v13_Windows_x64.zip",
+            "C:\dc13\dist\DominantControl_Portable_v13_Windows_x64.zip.sha256"
+          )
+          foreach ($File in $Files) {
+            if (-not (Test-Path -LiteralPath $File)) {
+              throw "An expected file was not produced: $File"
+            }
+            Copy-Item -LiteralPath $File -Destination $Out -Force
+          }
+
+      # The Actions artifact is a convenience copy; the delivery is the release
+      # below.  When the account's artifact quota is full this step fails, and
+      # it must not take the release down with it.
+      - name: Keep the build artifacts
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: DominantControl-v13-Windows-x64
+          path: release-output/*
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Create or update the v13 pre-release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $Tag = "v13.0.0"
+          $Notes = "docs/RELEASE_V13.md"
+
+          # A missing release is expected on the first publication. gh writes
+          # that 404 to stderr, and with ErrorActionPreference=Stop PowerShell
+          # 5.1 would end the step before we could read $LASTEXITCODE.
+          $ErrorActionPreference = "SilentlyContinue"
+          gh release view $Tag --repo $env:GITHUB_REPOSITORY *> $null
+          $ReleaseExists = ($LASTEXITCODE -eq 0)
+          $ErrorActionPreference = "Stop"
+
+          if (-not $ReleaseExists) {
+            gh release create $Tag `
+              --repo $env:GITHUB_REPOSITORY `
+              --target $env:GITHUB_SHA `
+              --title "Dominant Control v13" `
+              --notes-file $Notes `
+              --draft
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not create the release $Tag."
+            }
+          }
+          gh release upload $Tag `
+            "release-output\DominantControl_v13_Setup.exe" `
+            "release-output\DominantControl_v13_Setup.exe.sha256" `
+            "release-output\DominantControl_Portable_v13_Windows_x64.zip" `
+            "release-output\DominantControl_Portable_v13_Windows_x64.zip.sha256" `
+            --repo $env:GITHUB_REPOSITORY `
+            --clobber
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not attach the files to the release $Tag."
+          }
+          # Published as a pre-release: it stays available for testing, and
+          # `releases/latest` — the endpoint the in-app update check reads —
+          # keeps pointing at the current stable release until this one is
+          # promoted by hand.
+          gh release edit $Tag `
+            --repo $env:GITHUB_REPOSITORY `
+            --title "Dominant Control v13" `
+            --notes-file $Notes `
+            --draft=false `
+            --prerelease
+          if ($LASTEXITCODE -ne 0) {
+            throw "The files were uploaded, but the pre-release could not be published."
+          }
+
+      - name: Report the release as finished
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api `
+            --method POST `
+            "repos/$env:GITHUB_REPOSITORY/statuses/$env:GITHUB_SHA" `
+            -f state="success" `
+            -f context="Dominant Control v13 Release" `
+            -f description="Setup, portable ZIP and SHA-256 published as a pre-release" `
+            -f target_url="https://github.com/$env:GITHUB_REPOSITORY/releases/tag/v13.0.0"
+
+      - name: Report the build as failed
+        if: failure()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api `
+            --method POST `
+            "repos/$env:GITHUB_REPOSITORY/statuses/$env:GITHUB_SHA" `
+            -f state="failure" `
+            -f context="Dominant Control v13 Release" `
+            -f description="The build or the publication failed" `
+            -f target_url="https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"

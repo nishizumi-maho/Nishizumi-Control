@@ -1,0 +1,9 @@
+# Runtime and build dependencies pinned for reproducible Windows x64 builds.
+pyinstaller==6.21.0
+keyboard==0.13.5
+numpy==2.5.1
+psutil==7.2.2
+pyirsdk==1.3.6
+PyQt5==5.15.11
+PySide6-Essentials==6.11.1
+pywin32==312

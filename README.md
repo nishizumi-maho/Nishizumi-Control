@@ -19,7 +19,12 @@ An accessibility-focused control manager for iRacing that provides:
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 ## Overview
-Dominant Control is a single-file application (`dominant_control.py`) that manages iRacing’s driver-adjustable controls. It includes optional text-to-speech feedback, joystick support, and offline voice control when the related dependencies are installed.
+Dominant Control manages iRacing’s driver-adjustable controls. Since v13 it is a
+package (`dominant_control/`) started by `DominantControl.py`, and the Nishizumi
+tools — Fuel Monitor, Tire Wear, Traction, Safety Rating, Pit Calibrator,
+Caution and the Fair Share calculator — run inside it, sharing one telemetry
+connection. It includes optional text-to-speech feedback, joystick support, and
+offline voice control when the related dependencies are installed.
 
 ## Supported Platforms & Requirements
 - **OS:** Windows 10/11 (64-bit)
@@ -30,8 +35,15 @@ Dominant Control is a single-file application (`dominant_control.py`) that manag
 See [`requirements.txt`](requirements.txt) for the full Python dependency list.
 
 ## Project Layout
-- `dominant_control.py` — primary application entry point (single-file app).
-- `archive/` — legacy utilities and archived source (including `archive/dominant_control/`).
+- `DominantControl.py` — application entry point.
+- `dominant_control/` — the application package (UI, telemetry, tools, overlays).
+- `TireOverlayOriginal.py` — the Tire Wear overlay, launched as its own Qt process.
+- `installer/` — the Inno Setup script that produces the Windows installer.
+- `build/` — PyInstaller specs, version info and the portable launcher.
+- `tools/` — the two PowerShell scripts that build the portable folder and the installer.
+- `tests/` — the automated suite the build runs before packaging.
+- `archive/` — legacy utilities and archived source, including the previous
+  single-file application (`archive/dominant_controlnew.py`).
 - `docs/` — supplemental documentation.
 
 ## Installation
@@ -40,10 +52,10 @@ See [`requirements.txt`](requirements.txt) for the full Python dependency list.
 1. Install Python 3.10+ and Visual C++ Build Tools (for PyAudio) if missing.
 2. Clone or download this repository.
 3. Install dependencies: `python -m pip install -r requirements.txt`.
-4. Start the app: `python dominant_control.py`.
+4. Start the app: `python DominantControl.py`.
 
 ## How to Use the App
-1. **Run Dominant Control.** Start the app (`python dominant_control.py` or the packaged executable) so it is ready to detect telemetry.
+1. **Run Dominant Control.** Start the app (`python DominantControl.py` or the packaged executable) so it is ready to detect telemetry.
 2. **Launch iRacing.** Start iRacing and load into a session or practice so telemetry is active. The HUD overlay should appear once telemetry is detected.
 3. **Pick your input method.**
    - **Keyboard-only:** Use the default hotkeys to adjust driver controls.
@@ -55,6 +67,38 @@ See [`requirements.txt`](requirements.txt) for the full Python dependency list.
 8. **Exit safely.** Close the app when done or before shutting down iRacing.
 
 > **Tip:** If the HUD does not appear, confirm that iRacing telemetry is enabled and that the game has fully loaded into a session.
+
+## What the App Automates
+Two automations act on their own, and both follow the weather rather than the
+position on track:
+
+- **Automatic wipers** — driven by the precipitation the SDK reports.
+- **Auto Dry/Wet** — the Dry or Wet profile is applied when you get in the car
+  and when the session's declared condition changes.
+
+Nothing changes the car by itself because of where it is on the lap. There are
+no LapDist macros, no automatic pit limiter, no fuel mixture by flag, no hybrid
+hold by state of charge, no Push To Pass chaining and no automatic pit macro on
+the Second Throttle.
+
+## Building the Windows Release
+From a Windows checkout, in PowerShell:
+
+```powershell
+.\tools\build_portable.ps1            # portable folder + ZIP
+.\tools\build_installer.ps1           # the same, plus the Inno installer
+.\tools\build_portable.ps1 -TestsOnly # just run the suite
+```
+
+Both scripts keep the build Python and the Inno compiler inside
+`.build_runtime/`, so nothing is installed on the machine that compiles them.
+The release itself is published by
+`.github/workflows/dominant-control-v13-release.yml` when the tag `v13.0.0` is
+pushed.
+
+Application artwork is optional: drop `assets/DominantControl.ico` and
+`assets/DominantControl.png` in before building and both the window and the
+executable pick them up.
 
 ## Optional Features
 - **Joystick input:** Requires `pygame`.

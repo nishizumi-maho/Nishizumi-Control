@@ -1,0 +1,9 @@
+# Build outputs and the toolchain the build scripts keep inside the project.
+/dist/
+/.build_runtime/
+/build/work/
+/build/work_tire/
+/build/external_dist/
+
+__pycache__/
+*.py[cod]

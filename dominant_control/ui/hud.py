@@ -228,6 +228,48 @@ class OverlayWindow(tk.Toplevel):
         )
         self.lbl_turbo_pit.pack(side="right", padx=12)
 
+        # === PITSTOP RULES ===
+        # The ruleset iRacing publishes for the session, read for the car being
+        # driven: which service comes first, when an adjustment is applied and
+        # how long a full tank and a set of tires take.
+        self.frame_pit_rules = tk.Frame(
+            self.main_container,
+            bg=self.style_cfg["bg"],
+        )
+        self.lbl_pit_rules_title = tk.Label(
+            self.frame_pit_rules,
+            text="PIT RULES",
+            fg=self.style_cfg["fg_secondary"],
+            bg=self.style_cfg["bg"],
+            font=("Segoe UI Semibold", self.style_cfg["font_size"] - 2),
+            anchor="w",
+        )
+        self.lbl_pit_rules_title.pack(fill="x", padx=12)
+        self.lbl_pit_rules_headline = tk.Label(
+            self.frame_pit_rules,
+            text="--",
+            fg=self.style_cfg["fg"],
+            bg=self.style_cfg["bg"],
+            font=("Segoe UI Semibold", self.style_cfg["font_size"]),
+            anchor="w",
+            justify="left",
+            wraplength=310,
+        )
+        self.lbl_pit_rules_headline.pack(fill="x", padx=12)
+        self.lbl_pit_rules_detail = tk.Label(
+            self.frame_pit_rules,
+            text="",
+            fg=self.style_cfg["fg_secondary"],
+            bg=self.style_cfg["bg"],
+            font=("Segoe UI", self.style_cfg["font_size"] - 1),
+            anchor="w",
+            justify="left",
+            wraplength=310,
+        )
+        self.lbl_pit_rules_detail.pack(fill="x", padx=12, pady=(0, 4))
+        self._pit_rules_headline = ""
+        self._pit_rules_detail = ""
+
         # Guided macro capture stays visible even when the telemetry list is
         # collapsed, so the driver can work in replay with the app unfocused.
         self.capture_frame = tk.Frame(
@@ -619,6 +661,24 @@ class OverlayWindow(tk.Toplevel):
         )
         self.update_turbo_pit_indicator(self._turbo_pit_enabled)
 
+        # Pitstop rules
+        self.frame_pit_rules.config(bg=bg)
+        self.lbl_pit_rules_title.config(
+            bg=bg,
+            fg=fg_secondary,
+            font=("Segoe UI Semibold", fs - 2),
+        )
+        self.lbl_pit_rules_headline.config(
+            bg=bg,
+            fg=fg,
+            font=("Segoe UI Semibold", fs),
+        )
+        self.lbl_pit_rules_detail.config(
+            bg=bg,
+            fg=fg_secondary,
+            font=("Segoe UI", fs - 1),
+        )
+
         # Content area
         self.content_frame.config(bg=bg)
         self.canvas.config(bg=bg)
@@ -742,6 +802,31 @@ class OverlayWindow(tk.Toplevel):
                 text="● TURBO PIT",
                 fg=color,
             )
+        except Exception:
+            pass
+
+    def update_pitstop_rules(self, headline: str, detail: str) -> None:
+        """Show the active pitstop regulations, or hide the band when unknown."""
+
+        headline = str(headline or "").strip()
+        detail = str(detail or "").strip()
+        if (headline, detail) == (self._pit_rules_headline, self._pit_rules_detail):
+            return
+        self._pit_rules_headline = headline
+        self._pit_rules_detail = detail
+        try:
+            if not headline:
+                if self.frame_pit_rules.winfo_manager():
+                    self.frame_pit_rules.pack_forget()
+                return
+            self.lbl_pit_rules_headline.config(text=headline)
+            self.lbl_pit_rules_detail.config(text=detail)
+            if not self.frame_pit_rules.winfo_manager():
+                self.frame_pit_rules.pack(
+                    fill="x",
+                    pady=(0, 2),
+                    after=self.frame_status,
+                )
         except Exception:
             pass
 

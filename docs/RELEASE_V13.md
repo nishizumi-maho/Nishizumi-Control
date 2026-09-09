@@ -22,17 +22,11 @@ prompted to move until this release is promoted to the latest one.
 - **Second Throttle** — hold a percentage of throttle from a key or a button.
 - **Voice triggers, HUD and overlays** — rebuilt on the shared telemetry.
 - **Update check** — every six hours, and on demand from the Options menu.
-
-## What this build deliberately does not do
-
-Nothing changes the car by itself because of where it is on track. There are no
-LapDist macros, no automatic pit limiter, no fuel mixture by flag, no hybrid
-hold by state of charge, no Push To Pass chaining and no automatic pit macro.
-That code is not in the executable: it is removed from the source before the
-build, and the build fails if any of it survives.
-
-The two automations that do act on their own follow the weather rather than the
-lap: the windshield wipers and the Dry/Wet profile.
+- **Pit rules on the HUD** — the ruleset iRacing publishes for the session
+  (`WeekendInfo:AltAssetTag`: IMSA, NEC, DTM, and the global tags), read for
+  the car being driven: whether fuel and tires are serviced together or in
+  sequence, when an ARB, wing or bodywork change is applied, and how long a
+  full tank and a set of four tires take.
 
 ## Install
 
